@@ -259,18 +259,34 @@ def main():
         action="store_true",
         help="웹 브라우저에서 인터랙티브 대시보드 (Streamlit) 실행",
     )
+    parser.add_argument(
+        "--notify",
+        action="store_true",
+        help="전체 종목 스캔 후 텔레그램/슬랙/디스코드 웹훅 알림 1회 즉시 발송",
+    )
+    parser.add_argument(
+        "--scheduler",
+        action="store_true",
+        help="장 마감 시간별(국내 15:45, 미국 06:30) 자동 알림 백그라운드 스케줄러 실행",
+    )
 
     args = parser.parse_args()
-
 
     if args.dashboard:
         import subprocess
         print("🚀 [myStock] 웹 대시보드(Streamlit)를 시작합니다...")
         app_path = os.path.join(os.path.dirname(__file__), "app.py")
         subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
+    elif args.notify:
+        from scheduler import run_scan_and_notify
+        run_scan_and_notify(anchor_date=args.anchor)
+    elif args.scheduler:
+        from scheduler import start_scheduler_loop
+        start_scheduler_loop()
     elif args.scan:
         scan_market(anchor_date=args.anchor, days=args.days, order=args.order)
     else:
+
         analyze_stock(
             ticker=args.ticker,
             anchor_date=args.anchor,
