@@ -253,10 +253,22 @@ def main():
         action="store_true",
         help="주요 관심 종목(국내 대형주 + 미국 빅테크) 일괄 스캔 모드 실행",
     )
+    parser.add_argument(
+        "-w", "--web", "--dashboard",
+        dest="dashboard",
+        action="store_true",
+        help="웹 브라우저에서 인터랙티브 대시보드 (Streamlit) 실행",
+    )
 
     args = parser.parse_args()
 
-    if args.scan:
+
+    if args.dashboard:
+        import subprocess
+        print("🚀 [myStock] 웹 대시보드(Streamlit)를 시작합니다...")
+        app_path = os.path.join(os.path.dirname(__file__), "app.py")
+        subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
+    elif args.scan:
         scan_market(anchor_date=args.anchor, days=args.days, order=args.order)
     else:
         analyze_stock(
@@ -272,3 +284,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

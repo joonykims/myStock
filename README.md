@@ -30,7 +30,21 @@ pip install -r requirements.txt
 
 ## 💻 사용법
 
-### 1. 단일 종목 분석 (기본: 삼성전자 `005930`)
+### 1. 🌐 웹 인터랙티브 대시보드 실행 (강력 추천!)
+
+브라우저에서 차트 분석, 전종목 수급 스캐너, 지표 가이드를 한 번에 확인 가능한 대시보드를 실행합니다:
+
+```bash
+# 방법 1: main.py를 통한 실행
+python main.py --dashboard
+
+# 방법 2: streamlit 직접 실행
+streamlit run app.py
+```
+
+---
+
+### 2. 단일 종목 분석 (기본: 삼성전자 `005930`)
 
 ```bash
 # 기본 분석 (콘솔 요약 리포트)
@@ -43,7 +57,7 @@ python main.py -t 005930 -a 2026-01-02 -c
 python main.py -t 005930 -c --open
 ```
 
-### 2. 해외 주식 (미국 기술주 / ETF) 분석
+### 3. 해외 주식 (미국 기술주 / ETF) 분석
 
 ```bash
 # 엔비디아(NVDA) 분석 및 차트 생성
@@ -54,11 +68,12 @@ python main.py -t AAPL -c
 python main.py -t QQQ -c
 ```
 
-### 3. 관심 종목 일괄 스캐너 모드
+### 4. 관심 종목 일괄 스캐너 모드
 
 ```bash
 python main.py --scan
 ```
+
 
 ### 4. 옵션 설명
 

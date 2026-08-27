@@ -7,29 +7,15 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 
-def create_stock_chart(
+def create_stock_figure(
     df: pd.DataFrame,
     ticker: str,
     stock_name: str,
     signals: List[Dict[str, Any]],
     anchor_date: Optional[str] = None,
-    output_html_path: str = "chart.html",
-    auto_open: bool = False,
-) -> str:
+) -> go.Figure:
     """
-    Generate an interactive Plotly chart with Candlestick, AVWAP, Volume, OBV, and Divergence Signals.
-
-    Parameters:
-        df: DataFrame with OHLCV and indicator columns
-        ticker: Stock ticker
-        stock_name: Stock display name
-        signals: List of detected divergence signal dicts
-        anchor_date: AVWAP anchor date string
-        output_html_path: Output file path for HTML chart
-        auto_open: Whether to automatically launch the default browser
-
-    Returns:
-        Absolute path to the created HTML file
+    Build and return a Plotly Figure object with Candlestick, AVWAP, Volume, OBV, and Divergence Signals.
     """
     # Create 3 subplots: Price (row 1, 60%), Volume (row 2, 15%), OBV (row 3, 25%)
     fig = make_subplots(
@@ -232,6 +218,28 @@ def create_stock_chart(
         ]
     )
 
+    return fig
+
+
+def create_stock_chart(
+    df: pd.DataFrame,
+    ticker: str,
+    stock_name: str,
+    signals: List[Dict[str, Any]],
+    anchor_date: Optional[str] = None,
+    output_html_path: str = "chart.html",
+    auto_open: bool = False,
+) -> str:
+    """
+    Generate an interactive Plotly chart with Candlestick, AVWAP, Volume, OBV, and Divergence Signals, and save to HTML.
+    """
+    fig = create_stock_figure(
+        df=df,
+        ticker=ticker,
+        stock_name=stock_name,
+        signals=signals,
+        anchor_date=anchor_date,
+    )
     abs_path = os.path.abspath(output_html_path)
     fig.write_html(abs_path)
 
@@ -239,3 +247,4 @@ def create_stock_chart(
         webbrowser.open(f"file:///{abs_path}")
 
     return abs_path
+
