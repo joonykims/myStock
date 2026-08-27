@@ -105,6 +105,8 @@ with col_d2:
         format_func=lambda x: f"{x}일 ({x//365}년)" if x >= 365 else f"{x}일",
     )
 
+anchor_str = anchor_date.strftime("%Y-%m-%d")
+
 order_param = st.sidebar.slider(
     "다이버전스 탐색 윈도우 (Order)",
     min_value=3,
@@ -135,109 +137,107 @@ with tab_chart:
     with st.spinner(f"[{stock_name}] 주가 및 수급 데이터를 분석 중입니다..."):
         try:
             df = fetch_stock_data(ticker=ticker, days=days_lookback)
-            if df.empty:
-                st.error(f"❌ {ticker} 데이터를 가져올 수 없습니다.")
-                st.stop()
-
-            anchor_str = anchor_date.strftime("%Y-%m-%d")
-            df_ind = calculate_indicators(df, anchor_date=anchor_str)
-            signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_param)
-
-            # Latest KPI calculations
-            latest = df_ind.iloc[-1]
-            prev = df_ind.iloc[-2] if len(df_ind) > 1 else latest
-            latest_close = latest["Close"]
-            prev_close = prev["Close"]
-            day_change = latest_close - prev_close
-            day_change_pct = (day_change / prev_close * 100) if prev_close != 0 else 0
-
-            latest_avwap = latest["AVWAP"]
-            avwap_diff_pct = ((latest_close - latest_avwap) / latest_avwap * 100) if pd.notna(latest_avwap) else 0
-
-            latest_obv = latest["OBV"]
-            latest_obv_ema = latest["OBV_EMA"]
-
-            # 4 Metric Cards
-            m1, m2, m3, m4 = st.columns(4)
-
-            with m1:
-                st.metric(
-                    label="현재 종가",
-                    value=f"{latest_close:,.2f}",
-                    delta=f"{day_change:+,.2f} ({day_change_pct:+.2f}%)",
-                )
-
-            with m2:
-                if pd.notna(latest_avwap):
-                    status_text = "상회 (지지)" if avwap_diff_pct > 0 else "하회 (저항)"
-                    st.metric(
-                        label=f"AVWAP ({anchor_str}~)",
-                        value=f"{latest_avwap:,.2f}",
-                        delta=f"{avwap_diff_pct:+.2f}% ({status_text})",
-                        delta_color="normal" if avwap_diff_pct > 0 else "inverse",
-                    )
-                else:
-                    st.metric(label="AVWAP", value="N/A")
-
-            with m3:
-                obv_status = "단기 유입 우세" if latest_obv > latest_obv_ema else "단기 이탈 우세"
-                st.metric(
-                    label="OBV 수급 상태",
-                    value=f"{latest_obv:,.0f}",
-                    delta=obv_status,
-                    delta_color="normal" if latest_obv > latest_obv_ema else "inverse",
-                )
-
-            with m4:
-                recent_signals = [s for s in signals if (df_ind.index[-1] - s["date"]).days <= 30]
-                if recent_signals:
-                    last_sig = recent_signals[-1]
-                    sig_label = "★ 강세 (매수)" if last_sig["type"] == "BULLISH_DIVERGENCE" else "⚠️ 약세 (경고)"
-                    days_ago = (df_ind.index[-1] - last_sig["date"]).days
-                    st.metric(
-                        label="최근 30일 다이버전스",
-                        value=sig_label,
-                        delta=f"{days_ago}일 전 감지",
-                        delta_color="normal" if last_sig["type"] == "BULLISH_DIVERGENCE" else "inverse",
-                    )
-                else:
-                    st.metric(
-                        label="최근 30일 다이버전스",
-                        value="특이 신호 없음",
-                        delta="안정 추세",
-                    )
-
-            # Interactive Plotly Chart
-            fig = create_stock_figure(
-                df=df_ind,
-                ticker=ticker,
-                stock_name=stock_name,
-                signals=signals,
-                anchor_date=anchor_str,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Signal Table
-            st.subheader(f"📋 포착된 다이버전스 시그널 목록 (최근 {days_lookback}일)")
-            if signals:
-                sig_rows = []
-                for s in reversed(signals):
-                    is_bull = s["type"] == "BULLISH_DIVERGENCE"
-                    sig_rows.append({
-                        "발생일자": s["date"].strftime("%Y-%m-%d"),
-                        "신호 유형": "★ 강세 (스마트머니 매집)" if is_bull else "⚠️ 약세 (고점 분산/차익실현)",
-                        "발생 시점 주가": f"{s['price']:,.2f}",
-                        "이전 극값 일자": s["prev_date"].strftime("%Y-%m-%d"),
-                        "이전 극값 주가": f"{s['prev_price']:,.2f}",
-                        "분석 내용": s["message"],
-                    })
-                sig_table_df = pd.DataFrame(sig_rows)
-                st.dataframe(sig_table_df, use_container_width=True, hide_index=True)
+            if df is None or df.empty:
+                st.warning(f"⚠️ {ticker} ({stock_name})의 데이터를 불러오지 못했습니다. 종목 코드나 네트워크 상태를 확인해주세요.")
             else:
-                st.info("조회 기간 동안 발생한 다이버전스 신호가 없습니다.")
+                df_ind = calculate_indicators(df, anchor_date=anchor_str)
+                signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_param)
 
+                # Latest KPI calculations
+                latest = df_ind.iloc[-1]
+                prev = df_ind.iloc[-2] if len(df_ind) > 1 else latest
+                latest_close = latest["Close"]
+                prev_close = prev["Close"]
+                day_change = latest_close - prev_close
+                day_change_pct = (day_change / prev_close * 100) if prev_close != 0 else 0
+
+                latest_avwap = latest["AVWAP"]
+                avwap_diff_pct = ((latest_close - latest_avwap) / latest_avwap * 100) if pd.notna(latest_avwap) else 0
+
+                latest_obv = latest["OBV"]
+                latest_obv_ema = latest["OBV_EMA"]
+
+                # 4 Metric Cards
+                m1, m2, m3, m4 = st.columns(4)
+
+                with m1:
+                    st.metric(
+                        label="현재 종가",
+                        value=f"{latest_close:,.2f}",
+                        delta=f"{day_change:+,.2f} ({day_change_pct:+.2f}%)",
+                    )
+
+                with m2:
+                    if pd.notna(latest_avwap):
+                        status_text = "상회 (지지)" if avwap_diff_pct > 0 else "하회 (저항)"
+                        st.metric(
+                            label=f"AVWAP ({anchor_str}~)",
+                            value=f"{latest_avwap:,.2f}",
+                            delta=f"{avwap_diff_pct:+.2f}% ({status_text})",
+                            delta_color="normal" if avwap_diff_pct > 0 else "inverse",
+                        )
+                    else:
+                        st.metric(label="AVWAP", value="N/A")
+
+                with m3:
+                    obv_status = "단기 유입 우세" if latest_obv > latest_obv_ema else "단기 이탈 우세"
+                    st.metric(
+                        label="OBV 수급 상태",
+                        value=f"{latest_obv:,.0f}",
+                        delta=obv_status,
+                        delta_color="normal" if latest_obv > latest_obv_ema else "inverse",
+                    )
+
+                with m4:
+                    recent_signals = [s for s in signals if (df_ind.index[-1] - s["date"]).days <= 30]
+                    if recent_signals:
+                        last_sig = recent_signals[-1]
+                        sig_label = "★ 강세 (매수)" if last_sig["type"] == "BULLISH_DIVERGENCE" else "⚠️ 약세 (경고)"
+                        days_ago = (df_ind.index[-1] - last_sig["date"]).days
+                        st.metric(
+                            label="최근 30일 다이버전스",
+                            value=sig_label,
+                            delta=f"{days_ago}일 전 감지",
+                            delta_color="normal" if last_sig["type"] == "BULLISH_DIVERGENCE" else "inverse",
+                        )
+                    else:
+                        st.metric(
+                            label="최근 30일 다이버전스",
+                            value="특이 신호 없음",
+                            delta="안정 추세",
+                        )
+
+                # Interactive Plotly Chart
+                fig = create_stock_figure(
+                    df=df_ind,
+                    ticker=ticker,
+                    stock_name=stock_name,
+                    signals=signals,
+                    anchor_date=anchor_str,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Signal Table
+                st.subheader(f"📋 포착된 다이버전스 시그널 목록 (최근 {days_lookback}일)")
+                if signals:
+                    sig_rows = []
+                    for s in reversed(signals):
+                        is_bull = s["type"] == "BULLISH_DIVERGENCE"
+                        sig_rows.append({
+                            "발생일자": s["date"].strftime("%Y-%m-%d"),
+                            "신호 유형": "★ 강세 (스마트머니 매집)" if is_bull else "⚠️ 약세 (고점 분산/차익실현)",
+                            "발생 시점 주가": f"{s['price']:,.2f}",
+                            "이전 극값 일자": s["prev_date"].strftime("%Y-%m-%d"),
+                            "이전 극값 주가": f"{s['prev_price']:,.2f}",
+                            "분석 내용": s["message"],
+                        })
+                    sig_table_df = pd.DataFrame(sig_rows)
+                    st.dataframe(sig_table_df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("조회 기간 동안 발생한 다이버전스 신호가 없습니다.")
         except Exception as e:
             st.error(f"분석 중 오류가 발생했습니다: {e}")
+
 
 # --- TAB 2: Multi-Stock Scanner ---
 with tab_scanner:
