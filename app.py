@@ -126,6 +126,13 @@ st.sidebar.markdown(
 # 3. Main Dashboard Body
 stock_name = get_stock_name(ticker)
 
+
+@st.cache_data(ttl=600, show_spinner=False)
+def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
+    """Cached wrapper for fetch_stock_data to ensure responsive UI and prevent rate limiting."""
+    return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
+
+
 tab_chart, tab_scanner, tab_guide = st.tabs([
     f"📊 {stock_name} 상세 차트 분석",
     "🔍 시장 수급 스캐너 (전종목)",
@@ -136,12 +143,13 @@ tab_chart, tab_scanner, tab_guide = st.tabs([
 with tab_chart:
     with st.spinner(f"[{stock_name}] 주가 및 수급 데이터를 분석 중입니다..."):
         try:
-            df = fetch_stock_data(ticker=ticker, days=days_lookback)
+            df = load_stock_data(ticker_symbol=ticker, days_cnt=days_lookback)
             if df is None or df.empty:
                 st.warning(f"⚠️ {ticker} ({stock_name})의 데이터를 불러오지 못했습니다. 종목 코드나 네트워크 상태를 확인해주세요.")
             else:
                 df_ind = calculate_indicators(df, anchor_date=anchor_str)
                 signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_param)
+
 
                 # Latest KPI calculations
                 latest = df_ind.iloc[-1]
@@ -257,10 +265,11 @@ with tab_scanner:
         for t in scan_list:
             try:
                 name = get_stock_name(t)
-                d = fetch_stock_data(t, days=365)
-                if d.empty:
+                d = load_stock_data(t, 365)
+                if d is None or d.empty:
                     continue
                 d_ind = calculate_indicators(d, anchor_date=anchor_s)
+
                 sigs, _, _ = detect_obv_divergence(d_ind, order=5)
 
                 cur = d_ind.iloc[-1]
