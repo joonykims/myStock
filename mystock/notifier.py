@@ -1,7 +1,34 @@
 import os
 import json
 import requests
+from pathlib import Path
 from typing import List, Dict, Any, Optional
+
+
+def _load_env_file():
+    """Load key-value pairs from .env file into os.environ if present."""
+    # Look for .env in current directory or project root
+    env_paths = [
+        Path.cwd() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in env_paths:
+        if env_path.is_file():
+            try:
+                with open(env_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip("'\"")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+
+
+_load_env_file()
 
 
 class NotificationManager:
@@ -14,10 +41,12 @@ class NotificationManager:
         slack_webhook_url: Optional[str] = None,
         discord_webhook_url: Optional[str] = None,
     ):
+        _load_env_file()
         self.telegram_token = telegram_token or os.getenv("TELEGRAM_BOT_TOKEN")
         self.telegram_chat_id = telegram_chat_id or os.getenv("TELEGRAM_CHAT_ID")
         self.slack_webhook_url = slack_webhook_url or os.getenv("SLACK_WEBHOOK_URL")
         self.discord_webhook_url = discord_webhook_url or os.getenv("DISCORD_WEBHOOK_URL")
+
 
     def format_scan_report(
         self,
@@ -107,3 +136,25 @@ class NotificationManager:
             results["console"] = True
 
         return results
+
+    @staticmethod
+    def get_latest_chat_id_from_telegram(bot_token: str) -> Optional[int]:
+        """
+        Fetch the latest Chat ID who sent a message to the bot.
+        Useful when the user just created a bot and needs their Chat ID.
+        """
+        url = f"https://api.telegram.org/bot{bot_token}/getUpdates"
+        try:
+            resp = requests.get(url, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                results = data.get("result", [])
+                if results:
+                    last_update = results[-1]
+                    message = last_update.get("message") or last_update.get("channel_post") or {}
+                    chat = message.get("chat", {})
+                    return chat.get("id")
+        except Exception as e:
+            print(f"[Notifier Error] Failed to get telegram updates: {e}")
+        return None
+

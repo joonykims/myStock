@@ -265,6 +265,11 @@ def main():
         help="전체 종목 스캔 후 텔레그램/슬랙/디스코드 웹훅 알림 1회 즉시 발송",
     )
     parser.add_argument(
+        "--test-notify",
+        action="store_true",
+        help="설정된 텔레그램/슬랙/디스코드 메신저로 테스트 메시지 1회 발송",
+    )
+    parser.add_argument(
         "--scheduler",
         action="store_true",
         help="장 마감 시간별(국내 15:45, 미국 06:30) 자동 알림 백그라운드 스케줄러 실행",
@@ -272,14 +277,23 @@ def main():
 
     args = parser.parse_args()
 
+
     if args.dashboard:
         import subprocess
         print("🚀 [myStock] 웹 대시보드(Streamlit)를 시작합니다...")
         app_path = os.path.join(os.path.dirname(__file__), "app.py")
         subprocess.run([sys.executable, "-m", "streamlit", "run", app_path])
+    elif args.test_notify:
+        from mystock.notifier import NotificationManager
+        mgr = NotificationManager()
+        test_msg = "🔔 [myStock] 텔레그램 봇 연동 테스트 메시지입니다.\n알림 설정이 정상적으로 완료되었습니다! 🎉"
+        print("📡 테스트 메시지 발송 중...")
+        res = mgr.broadcast(test_msg)
+        print(f"결과: {res}")
     elif args.notify:
         from scheduler import run_scan_and_notify
         run_scan_and_notify(anchor_date=args.anchor)
+
     elif args.scheduler:
         from scheduler import start_scheduler_loop
         start_scheduler_loop()
