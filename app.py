@@ -376,23 +376,24 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
 
     # Category filter pills
     scan_cat_tabs = ["전체 종목"] + available_categories
-    selected_scan_cat = st.radio("필터 그룹 선택", scan_cat_tabs, horizontal=True)
+    selected_scan_cat = st.radio("필터 그룹 선택", scan_cat_tabs, horizontal=True, key="scan_cat_radio")
 
     col_btn_sc1, col_btn_sc2 = st.columns([1, 4])
     with col_btn_sc1:
-        if st.button("🔄 스캔 새로고침", type="secondary"):
-            st.cache_data.clear()
-            st.rerun()
+        force_rescan = st.button("🔄 스캔 새로고침", type="secondary")
 
-    @st.cache_data(ttl=300)
-    def run_market_scan(anchor_s, cat_filter):
-        if cat_filter == "전체 종목":
+    # -- Scan logic: session_state cache for instant tab switches --
+    scan_cache_key = f"_scan_result_{anchor_str}_{selected_scan_cat}"
+
+    def _run_scan():
+        """Execute market scan for all tickers in the selected group."""
+        if selected_scan_cat == "전체 종목":
             scan_items = get_all_tickers()
         else:
-            raw = watchlist_data.get(cat_filter, [])
+            raw = watchlist_data.get(selected_scan_cat, [])
             scan_items = [
-                {"ticker": it["ticker"], "name": it.get("name", it["ticker"]), "category": cat_filter, "anchor": it.get("anchor"), "memo": it.get("memo", "")}
-                if isinstance(it, dict) else {"ticker": str(it), "name": str(it), "category": cat_filter, "anchor": None, "memo": ""}
+                {"ticker": it["ticker"], "name": it.get("name", it["ticker"]), "category": selected_scan_cat, "anchor": it.get("anchor"), "memo": it.get("memo", "")}
+                if isinstance(it, dict) else {"ticker": str(it), "name": str(it), "category": selected_scan_cat, "anchor": None, "memo": ""}
                 for it in raw
             ]
 
@@ -401,7 +402,7 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
             t = it["ticker"]
             n = it.get("name", t)
             cat = it.get("category", "")
-            item_a = it.get("anchor") or anchor_s
+            item_a = it.get("anchor") or anchor_str
             memo = it.get("memo", "")
 
             try:
@@ -438,53 +439,65 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
                 pass
         return pd.DataFrame(results)
 
-    with st.spinner("종목 그룹을 스캔 중입니다..."):
-        scan_df = run_market_scan(anchor_str, selected_scan_cat)
+    # Force rescan: clear session cache for this scan
+    if force_rescan:
+        for k in list(st.session_state.keys()):
+            if k.startswith("_scan_result_"):
+                del st.session_state[k]
+        st.cache_data.clear()
+        st.rerun()
 
-        if not scan_df.empty:
-            def style_diff(val):
-                if isinstance(val, (int, float)):
-                    if val > 0:
-                        return "color: #ef4444; font-weight: bold;"
-                    elif val < 0:
-                        return "color: #3b82f6; font-weight: bold;"
-                return ""
+    # Use session_state to cache scan results — instant on tab switches
+    if scan_cache_key not in st.session_state:
+        with st.spinner("종목 그룹을 스캔 중입니다..."):
+            st.session_state[scan_cache_key] = _run_scan()
 
-            st.dataframe(
-                scan_df.style.map(style_diff, subset=["이격률(%)"]),
-                use_container_width=True,
-                hide_index=True,
-            )
+    scan_df = st.session_state[scan_cache_key]
 
-            # Quick Direct Navigation Cards / Buttons
-            st.markdown("### 🎯 상세 차트로 바로 이동하기")
-            st.caption("아래 종목 버튼을 클릭하시면 해당 종목의 상세 차트 분석 화면으로 즉시 전환됩니다.")
+    if not scan_df.empty:
+        def style_diff(val):
+            if isinstance(val, (int, float)):
+                if val > 0:
+                    return "color: #ef4444; font-weight: bold;"
+                elif val < 0:
+                    return "color: #3b82f6; font-weight: bold;"
+            return ""
 
-            card_cols = st.columns(4)
-            for idx, row in scan_df.iterrows():
-                t_code = row["티커"]
-                t_name = row["종목명"]
-                t_diff = row["이격률(%)"]
-                t_sig = row["최근 30일 신호"]
+        st.dataframe(
+            scan_df.style.map(style_diff, subset=["이격률(%)"]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
-                with card_cols[idx % 4]:
-                    diff_color = "#ef4444" if t_diff > 0 else "#3b82f6"
-                    sig_badge = f"<span style='color:#34d399'>{t_sig}</span>" if "강세" in t_sig else (f"<span style='color:#fb7185'>{t_sig}</span>" if "약세" in t_sig else "<span style='color:#64748b'>-</span>")
+        # Quick Direct Navigation Cards / Buttons
+        st.markdown("### 🎯 상세 차트로 바로 이동하기")
+        st.caption("아래 종목 버튼을 클릭하시면 해당 종목의 상세 차트 분석 화면으로 즉시 전환됩니다.")
 
-                    st.markdown(f"""
-                    <div style="background-color:#1e293b; padding:10px; border-radius:8px; border:1px solid #334155; margin-bottom:6px;">
-                        <b>{t_name}</b> <small style="color:#94a3b8">({t_code})</small><br>
-                        <small>AVWAP 이격: <b style="color:{diff_color}">{t_diff:+.1f}%</b></small><br>
-                        <small>신호: {sig_badge}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    if st.button(f"📊 {t_name} 차트 보기", key=f"nav_chart_{t_code}_{idx}", use_container_width=True):
-                        st.session_state["selected_ticker"] = t_code
-                        st.session_state["active_tab"] = "📊 상세 차트 분석"
-                        st.session_state["programmatic_ticker_change"] = True
-                        st.rerun()
-        else:
-            st.warning("스캔 데이터를 불러오지 못했습니다.")
+        card_cols = st.columns(4)
+        for idx, row in scan_df.iterrows():
+            t_code = row["티커"]
+            t_name = row["종목명"]
+            t_diff = row["이격률(%)"]
+            t_sig = row["최근 30일 신호"]
+
+            with card_cols[idx % 4]:
+                diff_color = "#ef4444" if t_diff > 0 else "#3b82f6"
+                sig_badge = f"<span style='color:#34d399'>{t_sig}</span>" if "강세" in t_sig else (f"<span style='color:#fb7185'>{t_sig}</span>" if "약세" in t_sig else "<span style='color:#64748b'>-</span>")
+
+                st.markdown(f"""
+                <div style="background-color:#1e293b; padding:10px; border-radius:8px; border:1px solid #334155; margin-bottom:6px;">
+                    <b>{t_name}</b> <small style="color:#94a3b8">({t_code})</small><br>
+                    <small>AVWAP 이격: <b style="color:{diff_color}">{t_diff:+.1f}%</b></small><br>
+                    <small>신호: {sig_badge}</small>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button(f"📊 {t_name} 차트 보기", key=f"nav_chart_{t_code}_{idx}", use_container_width=True):
+                    st.session_state["selected_ticker"] = t_code
+                    st.session_state["active_tab"] = "📊 상세 차트 분석"
+                    st.session_state["programmatic_ticker_change"] = True
+                    st.rerun()
+    else:
+        st.warning("스캔 데이터를 불러오지 못했습니다.")
 
 # ==========================================
 # TAB 3: Watchlist Management
