@@ -27,6 +27,7 @@ venv/
 .venv/
 env/
 ENV/
+.env
 
 # Generated Charts and Outputs
 chart_*.html
