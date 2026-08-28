@@ -17,7 +17,6 @@ from mystock.watchlist import (
     copy_ticker_between_categories,
 )
 
-
 # 1. Page Configuration
 st.set_page_config(
     page_title="myStock - 수급 지표 & 다이버전스 대시보드",
@@ -62,15 +61,33 @@ st.markdown("""
         font-size: 0.8rem;
         font-weight: 600;
     }
+    /* Top tab radio styling */
+    div[data-testid="stRadio"] > div {
+        gap: 10px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 2. Sidebar - Inputs & Controls
-st.sidebar.title("📈 myStock 분석 설정")
+# 2. Session State Initialization
+if "selected_ticker" not in st.session_state:
+    st.session_state["selected_ticker"] = "005930"
+
+TAB_NAMES = [
+    "📊 상세 차트 분석",
+    "🔍 시장 수급 스캐너 (그룹별)",
+    "⚙️ 보유/관심 종목 관리",
+    "💡 수급 지표 활용 가이드",
+]
+
+if "active_tab" not in st.session_state:
+    st.session_state["active_tab"] = TAB_NAMES[0]
 
 # Load categorized watchlist
 watchlist_data = load_watchlist()
 available_categories = list(watchlist_data.keys())
+
+# 3. Sidebar - Inputs & Controls
+st.sidebar.title("📈 myStock 분석 설정")
 
 # Category selector in sidebar
 selected_group = st.sidebar.selectbox(
@@ -84,7 +101,11 @@ stock_options = {}
 default_index = 0
 
 if selected_group == "직접 입력":
-    ticker_input = st.sidebar.text_input("종목 코드 / 티커 입력", value="005930", help="국내 6자리 종목코드 또는 미국 티커")
+    ticker_input = st.sidebar.text_input(
+        "종목 코드 / 티커 입력",
+        value=st.session_state["selected_ticker"],
+        help="국내 6자리 종목코드 또는 미국 티커",
+    )
     ticker = ticker_input.strip().upper()
     current_item_anchor = None
 else:
@@ -98,27 +119,35 @@ else:
             for it in raw_items
         ]
 
-    for item in target_list:
+    option_keys = []
+    for idx, item in enumerate(target_list):
         t = item["ticker"]
         n = item.get("name", t)
         cat = item.get("category", "")
         cat_badge = f"[{cat}] " if cat and selected_group == "전체 보기" else ""
         label = f"{cat_badge}{n} ({t})"
         stock_options[label] = item
+        option_keys.append(label)
+        if t.upper() == st.session_state["selected_ticker"].upper():
+            default_index = idx
 
     if stock_options:
-        selected_label = st.sidebar.selectbox("🎯 분석할 종목 선택", options=list(stock_options.keys()), index=0)
+        selected_label = st.sidebar.selectbox(
+            "🎯 분석할 종목 선택",
+            options=option_keys,
+            index=default_index if default_index < len(option_keys) else 0,
+        )
         selected_item = stock_options[selected_label]
         ticker = selected_item["ticker"]
+        st.session_state["selected_ticker"] = ticker
         current_item_anchor = selected_item.get("anchor")
     else:
-        ticker = "005930"
+        ticker = st.session_state["selected_ticker"]
         current_item_anchor = None
 
 # Date & Lookback controls
 col_d1, col_d2 = st.sidebar.columns(2)
 with col_d1:
-    # Use item's custom anchor if available, otherwise start of current year
     if current_item_anchor:
         try:
             default_anchor = datetime.strptime(current_item_anchor, "%Y-%m-%d").date()
@@ -158,7 +187,7 @@ st.sidebar.markdown(
     "- **약세 다이버전스(⚠️)**: 주가 고점 상승 vs OBV 고점 하락 ➔ 매도/경고 신호"
 )
 
-# 3. Main Dashboard Body
+# 4. Main Dashboard Header & Top Tab Navigation
 stock_name = get_stock_name(ticker)
 
 
@@ -168,15 +197,29 @@ def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
     return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
 
 
-tab_chart, tab_scanner, tab_manage, tab_guide = st.tabs([
-    f"📊 {stock_name} 상세 차트 분석",
-    "🔍 시장 수급 스캐너 (그룹별)",
-    "⚙️ 보유/관심 종목 관리",
-    "💡 수급 지표 활용 가이드",
-])
+# Top Navigation Bar
+current_tab_index = TAB_NAMES.index(st.session_state["active_tab"]) if st.session_state["active_tab"] in TAB_NAMES else 0
+selected_nav = st.radio(
+    "메뉴 탭",
+    options=TAB_NAMES,
+    index=current_tab_index,
+    horizontal=True,
+    label_visibility="collapsed",
+)
 
-# --- TAB 1: Detailed Chart & Metrics ---
-with tab_chart:
+# Update state if user clicked another tab manually
+if selected_nav != st.session_state["active_tab"]:
+    st.session_state["active_tab"] = selected_nav
+    st.rerun()
+
+st.markdown("---")
+
+# ==========================================
+# TAB 1: Detailed Chart & Metrics
+# ==========================================
+if st.session_state["active_tab"] == "📊 상세 차트 분석":
+    st.markdown(f"### 📊 {stock_name} 상세 수급 & 차트 분석")
+
     with st.spinner(f"[{stock_name}] 주가 및 수급 데이터를 분석 중입니다..."):
         try:
             df = load_stock_data(ticker_symbol=ticker, days_cnt=days_lookback)
@@ -281,17 +324,22 @@ with tab_chart:
         except Exception as e:
             st.error(f"분석 중 오류가 발생했습니다: {e}")
 
-# --- TAB 2: Multi-Stock Scanner ---
-with tab_scanner:
+# ==========================================
+# TAB 2: Multi-Stock Scanner with Direct Navigation
+# ==========================================
+elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)":
     st.subheader("🔍 보유/관심 종목 그룹별 실시간 수급 스캔")
-    st.caption("watchlist.json에 등록된 그룹별 종목들의 AVWAP 이격률과 최근 30일 다이버전스를 실시간 스크리닝합니다.")
+    st.caption("종목을 클릭하거나 아래의 [📊 차트 보기] 버튼을 누르면 해당 종목의 상세 분석 차트로 즉시 이동합니다.")
 
     # Category filter pills
     scan_cat_tabs = ["전체 종목"] + available_categories
     selected_scan_cat = st.radio("필터 그룹 선택", scan_cat_tabs, horizontal=True)
 
-    if st.button("🔄 수급 스캔 새로고침 실행", type="primary"):
-        st.cache_data.clear()
+    col_btn_sc1, col_btn_sc2 = st.columns([1, 4])
+    with col_btn_sc1:
+        if st.button("🔄 스캔 새로고침", type="secondary"):
+            st.cache_data.clear()
+            st.rerun()
 
     @st.cache_data(ttl=300)
     def run_market_scan(anchor_s, cat_filter):
@@ -349,6 +397,7 @@ with tab_scanner:
 
     with st.spinner("종목 그룹을 스캔 중입니다..."):
         scan_df = run_market_scan(anchor_str, selected_scan_cat)
+
         if not scan_df.empty:
             def style_diff(val):
                 if isinstance(val, (int, float)):
@@ -363,13 +412,42 @@ with tab_scanner:
                 use_container_width=True,
                 hide_index=True,
             )
+
+            # Quick Direct Navigation Cards / Buttons
+            st.markdown("### 🎯 상세 차트로 바로 이동하기")
+            st.caption("아래 종목 버튼을 클릭하시면 해당 종목의 상세 차트 분석 화면으로 즉시 전환됩니다.")
+
+            card_cols = st.columns(4)
+            for idx, row in scan_df.iterrows():
+                t_code = row["티커"]
+                t_name = row["종목명"]
+                t_diff = row["이격률(%)"]
+                t_sig = row["최근 30일 신호"]
+
+                with card_cols[idx % 4]:
+                    diff_color = "#ef4444" if t_diff > 0 else "#3b82f6"
+                    sig_badge = f"<span style='color:#34d399'>{t_sig}</span>" if "강세" in t_sig else (f"<span style='color:#fb7185'>{t_sig}</span>" if "약세" in t_sig else "<span style='color:#64748b'>-</span>")
+
+                    st.markdown(f"""
+                    <div style="background-color:#1e293b; padding:10px; border-radius:8px; border:1px solid #334155; margin-bottom:6px;">
+                        <b>{t_name}</b> <small style="color:#94a3b8">({t_code})</small><br>
+                        <small>AVWAP 이격: <b style="color:{diff_color}">{t_diff:+.1f}%</b></small><br>
+                        <small>신호: {sig_badge}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button(f"📊 {t_name} 차트 보기", key=f"nav_chart_{t_code}_{idx}", use_container_width=True):
+                        st.session_state["selected_ticker"] = t_code
+                        st.session_state["active_tab"] = "📊 상세 차트 분석"
+                        st.rerun()
         else:
             st.warning("스캔 데이터를 불러오지 못했습니다.")
 
-# --- TAB 3: Watchlist Management ---
-with tab_manage:
+# ==========================================
+# TAB 3: Watchlist Management
+# ==========================================
+elif st.session_state["active_tab"] == "⚙️ 보유/관심 종목 관리":
     st.subheader("⚙️ 보유/관심 종목 관리 (`watchlist.json`)")
-    st.caption("새로운 종목을 추가하거나 그룹(보유종목, 초관심종목, 관심종목)을 관리합니다.")
+    st.caption("새로운 종목을 추가하거나 그룹(보유종목, 초관심종목, 관심종목)을 관리하고 그룹 간 이동/복사합니다.")
 
     # Form to add/update ticker
     with st.expander("➕ 새 종목 추가 / 수정", expanded=True):
@@ -398,7 +476,7 @@ with tab_manage:
                 st.cache_data.clear()
                 st.rerun()
 
-    # Display and delete current stocks
+    # Display, move, copy, and delete current stocks
     st.markdown("### 📋 현재 등록된 그룹별 종목 목록")
     current_wl = load_watchlist()
 
@@ -423,6 +501,12 @@ with tab_manage:
                             <small style="color:#38bdf8">{t_memo if t_memo else '메모 없음'}</small>
                         </div>
                         """, unsafe_allow_html=True)
+
+                        # Quick chart view from watchlist tab
+                        if st.button(f"📊 차트 보기", key=f"wl_chart_{cat_name}_{t_code}", use_container_width=True):
+                            st.session_state["selected_ticker"] = t_code
+                            st.session_state["active_tab"] = "📊 상세 차트 분석"
+                            st.rerun()
 
                         if other_cats:
                             sel_target = st.selectbox(
@@ -457,9 +541,10 @@ with tab_manage:
         else:
             st.info("등록된 종목이 없습니다.")
 
-
-# --- TAB 4: Guide ---
-with tab_guide:
+# ==========================================
+# TAB 4: Guide
+# ==========================================
+elif st.session_state["active_tab"] == "💡 수급 지표 활용 가이드":
     st.markdown("""
     ### 📖 수급 지표 및 다이버전스 분석 전략 가이드
 
