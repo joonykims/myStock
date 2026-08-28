@@ -7,6 +7,12 @@
       "memo": "주력 핵심 보유"
     },
     {
+      "ticker": "000660",
+      "name": "SK하이닉스",
+      "anchor": "2026-01-02",
+      "memo": "HBM 실적 모멘텀"
+    },
+    {
       "ticker": "NVDA",
       "name": "엔비디아",
       "anchor": "2026-01-02",
@@ -17,15 +23,21 @@
       "name": "나스닥100 ETF",
       "anchor": "2026-01-02",
       "memo": "미국 기술주 지수 추종"
+    },
+    {
+      "ticker": "102110",
+      "name": "TIGER 200",
+      "anchor": "2026-01-02",
+      "memo": ""
+    },
+    {
+      "ticker": "AAPL",
+      "name": "애플",
+      "anchor": "2026-01-02",
+      "memo": "온디바이스 AI"
     }
   ],
   "초관심종목": [
-    {
-      "ticker": "000660",
-      "name": "SK하이닉스",
-      "anchor": "2026-01-02",
-      "memo": "HBM 실적 모멘텀"
-    },
     {
       "ticker": "QQQ",
       "name": "나스닥 100 ETF",
@@ -37,6 +49,18 @@
       "name": "테슬라",
       "anchor": "2026-01-02",
       "memo": "자율주행 및 로보택시"
+    },
+    {
+      "ticker": "0072R0",
+      "name": "TIGER KRX금현물",
+      "anchor": "2026-01-02",
+      "memo": ""
+    },
+    {
+      "ticker": "017670",
+      "name": "SK텔레콤",
+      "anchor": "2026-01-02",
+      "memo": ""
     }
   ],
   "관심종목": [
@@ -65,12 +89,6 @@
       "memo": "바닥권 수급 턴어라운드"
     },
     {
-      "ticker": "AAPL",
-      "name": "애플",
-      "anchor": "2026-01-02",
-      "memo": "온디바이스 AI"
-    },
-    {
       "ticker": "MSFT",
       "name": "마이크로소프트",
       "anchor": "2026-01-02",
@@ -81,6 +99,12 @@
       "name": "S&P 500 ETF",
       "anchor": "2026-01-02",
       "memo": "미국 대형주 시장 지수"
+    },
+    {
+      "ticker": "GOOGL",
+      "name": "알파벳 Class A",
+      "anchor": "2026-01-02",
+      "memo": "구글"
     }
   ]
 }
