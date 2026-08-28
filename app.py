@@ -232,9 +232,11 @@ else:
 stock_name = get_stock_name(ticker)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+# Layer 1: st.cache_data (in-memory, short TTL) prevents redundant Parquet reads within same session.
+# Layer 2: Parquet disk cache (in fetch_stock_data) prevents redundant API calls across sessions.
+@st.cache_data(ttl=60, show_spinner=False)
 def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
-    """Cached wrapper — Parquet disk cache handles persistence, st.cache_data handles in-session speed."""
+    """Two-layer cache: Streamlit memory (60s) → Parquet disk → API (only for delta)."""
     return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
 
 
