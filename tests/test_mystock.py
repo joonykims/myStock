@@ -97,9 +97,36 @@ class TestMyStock(unittest.TestCase):
             auto_open=False,
         )
         self.assertTrue(os.path.exists(path))
-        if os.path.exists(path):
-            os.remove(path)
+    def test_watchlist(self):
+        from mystock.watchlist import (
+            load_watchlist, add_ticker_to_category, remove_ticker_from_category,
+            get_category_tickers, get_all_tickers
+        )
+        test_file = "test_watchlist.json"
+        try:
+            wl = load_watchlist(test_file)
+            self.assertIn("보유종목", wl)
+            self.assertIn("초관심종목", wl)
+            self.assertIn("관심종목", wl)
+
+            # Test adding a ticker
+            add_ticker_to_category("보유종목", "005930", name="삼성전자", anchor="2026-01-02", memo="테스트", file_path=test_file)
+            tickers = get_category_tickers("보유종목", file_path=test_file)
+            self.assertIn("005930", tickers)
+
+            # Test all tickers list
+            all_t = get_all_tickers(file_path=test_file)
+            self.assertTrue(any(it["ticker"] == "005930" for it in all_t))
+
+            # Test removing ticker
+            remove_ticker_from_category("보유종목", "005930", file_path=test_file)
+            tickers_after = get_category_tickers("보유종목", file_path=test_file)
+            self.assertNotIn("005930", tickers_after)
+        finally:
+            if os.path.exists(test_file):
+                os.remove(test_file)
 
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,6 +1,26 @@
 # 📝 myStock 변경 및 개선 이력 (Changelog)
 
+## [v1.4.0] - 2026-08-28
+### 📁 보유종목 / 초관심종목 / 관심종목 그룹별 관리 기능 구축
+- **독립 설정 파일 기반 종목 관리 (`watchlist.json`)**:
+  - `보유종목`, `초관심종목`, `관심종목` 등 카테고리별 분리 관리 지원
+  - 종목별 티커, 종목명, 개별 앵커일자(`anchor`), 메모(`memo`) 지정 기능 제공
+- **종목 관리자 모듈 (`mystock/watchlist.py`)**:
+  - `load_watchlist()`, `save_watchlist()`, `get_category_tickers()`, `get_all_tickers()` 제공
+  - 대시보드 및 스크립트에서 동적으로 종목 추가/삭제/수정 API 구현
+- **웹 대시보드 UI 고도화 (`app.py`)**:
+  - 사이드바에서 그룹별(보유/초관심/관심/전체) 종목 필터링 선택 기능 추가
+  - 탭 2(시장 수급 스캐너)에 카테고리별 탭 필터 적용
+  - **'⚙️ 보유/관심 종목 관리' 탭 신설**: 웹 브라우저에서 직접 새 종목 추가 및 삭제 지원
+- **CLI 및 스케줄러 그룹 필터 (`main.py`, `scheduler.py`)**:
+  - `-g / --group` 옵션으로 특정 그룹만 타겟팅하여 스캔 및 알림 발송 가능 (예: `python main.py --scan -g 보유종목`)
+- **단위 테스트 추가 (`tests/test_mystock.py`)**:
+  - `test_watchlist` 테스트 케이스 추가 및 7개 단위 테스트 전원 정상 통과
+
+---
+
 ## [v1.3.0] - 2026-08-27
+
 ### 🔔 자동화 알림 시스템 & 스케줄러 구축
 - **다채널 알림 엔진 (`mystock/notifier.py`)**:
   - 텔레그램(Telegram Bot), 슬랙(Slack Webhook), 디스코드(Discord Webhook) 브로드캐스트 지원

@@ -7,6 +7,13 @@ from mystock.data_loader import fetch_stock_data, get_stock_name
 from mystock.indicators import calculate_indicators
 from mystock.divergence import detect_obv_divergence
 from mystock.visualizer import create_stock_figure
+from mystock.watchlist import (
+    load_watchlist,
+    save_watchlist,
+    get_all_tickers,
+    add_ticker_to_category,
+    remove_ticker_from_category,
+)
 
 # 1. Page Configuration
 st.set_page_config(
@@ -36,10 +43,6 @@ st.markdown("""
         font-weight: 700;
         color: #f8fafc;
     }
-    .metric-sub {
-        font-size: 0.8rem;
-        font-weight: 500;
-    }
     .badge-bull {
         background-color: #065f46;
         color: #34d399;
@@ -62,36 +65,65 @@ st.markdown("""
 # 2. Sidebar - Inputs & Controls
 st.sidebar.title("📈 myStock 분석 설정")
 
-POPULAR_STOCKS = {
-    "삼성전자 (005930)": "005930",
-    "SK하이닉스 (000660)": "000660",
-    "현대차 (005380)": "005380",
-    "LG에너지솔루션 (373220)": "373220",
-    "NAVER (035420)": "035420",
-    "카카오 (035720)": "035720",
-    "엔비디아 (NVDA)": "NVDA",
-    "애플 (AAPL)": "AAPL",
-    "마이크로소프트 (MSFT)": "MSFT",
-    "테슬라 (TSLA)": "TSLA",
-    "나스닥 100 ETF (QQQ)": "QQQ",
-    "S&P 500 ETF (SPY)": "SPY",
-}
+# Load categorized watchlist
+watchlist_data = load_watchlist()
+available_categories = list(watchlist_data.keys())
 
-stock_choice = st.sidebar.selectbox(
-    "인기 종목 빠른 선택",
-    options=["직접 입력"] + list(POPULAR_STOCKS.keys()),
-    index=1,
+# Category selector in sidebar
+selected_group = st.sidebar.selectbox(
+    "📁 종목 그룹 선택",
+    options=["전체 보기"] + available_categories + ["직접 입력"],
+    index=0,
 )
 
-if stock_choice == "직접 입력":
-    ticker = st.sidebar.text_input("종목 코드 / 티커 입력", value="005930", help="국내 6자리 종목코드 또는 미국 티커")
+# Build dynamic stock options based on category
+stock_options = {}
+default_index = 0
+
+if selected_group == "직접 입력":
+    ticker_input = st.sidebar.text_input("종목 코드 / 티커 입력", value="005930", help="국내 6자리 종목코드 또는 미국 티커")
+    ticker = ticker_input.strip().upper()
+    current_item_anchor = None
 else:
-    ticker = POPULAR_STOCKS[stock_choice]
+    if selected_group == "전체 보기":
+        target_list = get_all_tickers()
+    else:
+        raw_items = watchlist_data.get(selected_group, [])
+        target_list = [
+            {"ticker": it["ticker"], "name": it.get("name", it["ticker"]), "category": selected_group, "anchor": it.get("anchor"), "memo": it.get("memo", "")}
+            if isinstance(it, dict) else {"ticker": str(it), "name": str(it), "category": selected_group, "anchor": None, "memo": ""}
+            for it in raw_items
+        ]
+
+    for item in target_list:
+        t = item["ticker"]
+        n = item.get("name", t)
+        cat = item.get("category", "")
+        cat_badge = f"[{cat}] " if cat and selected_group == "전체 보기" else ""
+        label = f"{cat_badge}{n} ({t})"
+        stock_options[label] = item
+
+    if stock_options:
+        selected_label = st.sidebar.selectbox("🎯 분석할 종목 선택", options=list(stock_options.keys()), index=0)
+        selected_item = stock_options[selected_label]
+        ticker = selected_item["ticker"]
+        current_item_anchor = selected_item.get("anchor")
+    else:
+        ticker = "005930"
+        current_item_anchor = None
 
 # Date & Lookback controls
 col_d1, col_d2 = st.sidebar.columns(2)
 with col_d1:
-    default_anchor = datetime(datetime.now().year, 1, 2).date()
+    # Use item's custom anchor if available, otherwise start of current year
+    if current_item_anchor:
+        try:
+            default_anchor = datetime.strptime(current_item_anchor, "%Y-%m-%d").date()
+        except Exception:
+            default_anchor = datetime(datetime.now().year, 1, 2).date()
+    else:
+        default_anchor = datetime(datetime.now().year, 1, 2).date()
+
     anchor_date = st.date_input(
         "AVWAP 앵커 기준일",
         value=default_anchor,
@@ -133,9 +165,10 @@ def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
     return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
 
 
-tab_chart, tab_scanner, tab_guide = st.tabs([
+tab_chart, tab_scanner, tab_manage, tab_guide = st.tabs([
     f"📊 {stock_name} 상세 차트 분석",
-    "🔍 시장 수급 스캐너 (전종목)",
+    "🔍 시장 수급 스캐너 (그룹별)",
+    "⚙️ 보유/관심 종목 관리",
     "💡 수급 지표 활용 가이드",
 ])
 
@@ -149,7 +182,6 @@ with tab_chart:
             else:
                 df_ind = calculate_indicators(df, anchor_date=anchor_str)
                 signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_param)
-
 
                 # Latest KPI calculations
                 latest = df_ind.iloc[-1]
@@ -246,30 +278,43 @@ with tab_chart:
         except Exception as e:
             st.error(f"분석 중 오류가 발생했습니다: {e}")
 
-
 # --- TAB 2: Multi-Stock Scanner ---
 with tab_scanner:
-    st.subheader("🔍 주요 관심 종목 수급 및 시그널 일괄 스캔")
-    st.caption("국내 대표 대형주와 미국 주요 빅테크/ETF의 AVWAP 이격률과 최근 30일 다이버전스를 실시간 스크리닝합니다.")
+    st.subheader("🔍 보유/관심 종목 그룹별 실시간 수급 스캔")
+    st.caption("watchlist.json에 등록된 그룹별 종목들의 AVWAP 이격률과 최근 30일 다이버전스를 실시간 스크리닝합니다.")
 
-    if st.button("🔄 전체 종목 새로고침 스캔 실행", type="primary"):
+    # Category filter pills
+    scan_cat_tabs = ["전체 종목"] + available_categories
+    selected_scan_cat = st.radio("필터 그룹 선택", scan_cat_tabs, horizontal=True)
+
+    if st.button("🔄 수급 스캔 새로고침 실행", type="primary"):
         st.cache_data.clear()
 
     @st.cache_data(ttl=300)
-    def run_market_scan(anchor_s):
-        scan_list = [
-            "005930", "000660", "005380", "373220", "035420", "035720",
-            "NVDA", "AAPL", "MSFT", "TSLA", "QQQ", "SPY"
-        ]
+    def run_market_scan(anchor_s, cat_filter):
+        if cat_filter == "전체 종목":
+            scan_items = get_all_tickers()
+        else:
+            raw = watchlist_data.get(cat_filter, [])
+            scan_items = [
+                {"ticker": it["ticker"], "name": it.get("name", it["ticker"]), "category": cat_filter, "anchor": it.get("anchor"), "memo": it.get("memo", "")}
+                if isinstance(it, dict) else {"ticker": str(it), "name": str(it), "category": cat_filter, "anchor": None, "memo": ""}
+                for it in raw
+            ]
+
         results = []
-        for t in scan_list:
+        for it in scan_items:
+            t = it["ticker"]
+            n = it.get("name", t)
+            cat = it.get("category", "")
+            item_a = it.get("anchor") or anchor_s
+            memo = it.get("memo", "")
+
             try:
-                name = get_stock_name(t)
                 d = load_stock_data(t, 365)
                 if d is None or d.empty:
                     continue
-                d_ind = calculate_indicators(d, anchor_date=anchor_s)
-
+                d_ind = calculate_indicators(d, anchor_date=item_a)
                 sigs, _, _ = detect_obv_divergence(d_ind, order=5)
 
                 cur = d_ind.iloc[-1]
@@ -286,21 +331,22 @@ with tab_scanner:
                         sig_status = f"{sig_type_kor} ({d_ago}일전)"
 
                 results.append({
-                    "종목": name,
+                    "그룹": cat,
+                    "종목명": n,
                     "티커": t,
                     "현재가": f"{p_close:,.2f}",
                     "AVWAP": f"{p_avwap:,.2f}" if pd.notna(p_avwap) else "N/A",
                     "이격률(%)": round(diff, 2),
                     "최근 30일 신호": sig_status,
+                    "메모": memo,
                 })
             except Exception:
                 pass
         return pd.DataFrame(results)
 
-    with st.spinner("시장 주요 종목을 일괄 스캔 중입니다..."):
-        scan_df = run_market_scan(anchor_str)
+    with st.spinner("종목 그룹을 스캔 중입니다..."):
+        scan_df = run_market_scan(anchor_str, selected_scan_cat)
         if not scan_df.empty:
-            # Highlight positive/negative differences
             def style_diff(val):
                 if isinstance(val, (int, float)):
                     if val > 0:
@@ -317,7 +363,68 @@ with tab_scanner:
         else:
             st.warning("스캔 데이터를 불러오지 못했습니다.")
 
-# --- TAB 3: Guide ---
+# --- TAB 3: Watchlist Management ---
+with tab_manage:
+    st.subheader("⚙️ 보유/관심 종목 관리 (`watchlist.json`)")
+    st.caption("새로운 종목을 추가하거나 그룹(보유종목, 초관심종목, 관심종목)을 관리합니다.")
+
+    # Form to add/update ticker
+    with st.expander("➕ 새 종목 추가 / 수정", expanded=True):
+        with st.form("add_stock_form"):
+            fc1, fc2 = st.columns(2)
+            with fc1:
+                target_cat = st.selectbox("분류 그룹", options=available_categories + ["새 그룹 추가"])
+                if target_cat == "새 그룹 추가":
+                    target_cat = st.text_input("새 그룹 이름 입력", value="신규그룹")
+                new_ticker = st.text_input("티커 / 종목코드", placeholder="예: 000660 또는 AAPL")
+            with fc2:
+                new_name = st.text_input("종목명 (선택)", placeholder="예: SK하이닉스 또는 애플")
+                new_anchor = st.date_input("개별 앵커일자 (선택)", value=default_anchor).strftime("%Y-%m-%d")
+                new_memo = st.text_input("메모 (선택)", placeholder="예: HBM 대장주, 매수평단 15만원 등")
+
+            submit_btn = st.form_submit_button("💾 종목 저장하기", type="primary")
+            if submit_btn and new_ticker:
+                add_ticker_to_category(
+                    category=target_cat,
+                    ticker=new_ticker,
+                    name=new_name if new_name else get_stock_name(new_ticker),
+                    anchor=new_anchor,
+                    memo=new_memo,
+                )
+                st.success(f"✅ '{target_cat}' 그룹에 [{new_ticker}] 종목이 저장되었습니다!")
+                st.cache_data.clear()
+                st.rerun()
+
+    # Display and delete current stocks
+    st.markdown("### 📋 현재 등록된 그룹별 종목 목록")
+    current_wl = load_watchlist()
+
+    for cat_name, items in current_wl.items():
+        st.markdown(f"#### 📁 {cat_name} ({len(items)}개)")
+        if items:
+            c_cols = st.columns(3)
+            for idx, it in enumerate(items):
+                t_code = it["ticker"] if isinstance(it, dict) else str(it)
+                t_name = it.get("name", t_code) if isinstance(it, dict) else t_code
+                t_memo = it.get("memo", "") if isinstance(it, dict) else ""
+                t_anchor = it.get("anchor", "") if isinstance(it, dict) else ""
+
+                with c_cols[idx % 3]:
+                    st.markdown(f"""
+                    <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 10px;">
+                        <b>{t_name}</b> <span style="color:#94a3b8">({t_code})</span><br>
+                        <small style="color:#64748b">앵커일: {t_anchor if t_anchor else '연초'}</small><br>
+                        <small style="color:#38bdf8">{t_memo}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button(f"🗑️ 삭제: {t_code}", key=f"del_{cat_name}_{t_code}"):
+                        remove_ticker_from_category(cat_name, t_code)
+                        st.cache_data.clear()
+                        st.rerun()
+        else:
+            st.info("등록된 종목이 없습니다.")
+
+# --- TAB 4: Guide ---
 with tab_guide:
     st.markdown("""
     ### 📖 수급 지표 및 다이버전스 분석 전략 가이드

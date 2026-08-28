@@ -18,28 +18,11 @@ if sys.platform.startswith("win"):
     except Exception:
         pass
 
-
 from mystock.data_loader import fetch_stock_data, get_stock_name
 from mystock.indicators import calculate_indicators
 from mystock.divergence import detect_obv_divergence
 from mystock.visualizer import create_stock_chart
-
-DEFAULT_SCAN_TICKERS = [
-    # 국내 대형주
-    "005930",  # 삼성전자
-    "000660",  # SK하이닉스
-    "005380",  # 현대차
-    "373220",  # LG에너지솔루션
-    "035420",  # NAVER
-    "035720",  # 카카오
-    # 미국 주요 기술주 / ETF
-    "NVDA",
-    "AAPL",
-    "MSFT",
-    "TSLA",
-    "QQQ",
-    "SPY",
-]
+from mystock.watchlist import load_watchlist, get_all_tickers
 
 
 def analyze_stock(
@@ -63,7 +46,7 @@ def analyze_stock(
         print(f"❌ 데이터 수집 실패: {e}")
         return {}
 
-    if df.empty:
+    if df is None or df.empty:
         print("❌ 조회된 데이터가 없습니다.")
         return {}
 
@@ -107,7 +90,6 @@ def analyze_stock(
         print(f"총 {len(signals)}건의 신호가 포착되었습니다:")
         for s in signals:
             sig_date = s["date"].strftime("%Y-%m-%d")
-            sig_type = s["type"]
             msg = s["message"]
             print(f" - [{sig_date}] {msg}")
     else:
@@ -146,28 +128,46 @@ def analyze_stock(
 
 def scan_market(
     tickers: list = None,
+    group: str = None,
     anchor_date: str = None,
     days: int = 365,
     order: int = 5,
 ):
     """Scan a list of stocks for recent divergence signals and AVWAP status."""
-    if tickers is None or len(tickers) == 0:
-        tickers = DEFAULT_SCAN_TICKERS
+    watchlist = load_watchlist()
 
-    print(f"\n🔍 [관심 종목 일괄 스캐너] {len(tickers)}개 종목 분석 중...\n")
+    target_items = []
+    if tickers:
+        for t in tickers:
+            target_items.append({"ticker": t, "name": get_stock_name(t), "category": "사용자지정", "anchor": anchor_date})
+    elif group:
+        items = watchlist.get(group, [])
+        for it in items:
+            t = it["ticker"] if isinstance(it, dict) else str(it)
+            n = it.get("name", t) if isinstance(it, dict) else t
+            a = it.get("anchor", anchor_date) if isinstance(it, dict) else anchor_date
+            target_items.append({"ticker": t, "name": n, "category": group, "anchor": a})
+    else:
+        target_items = get_all_tickers()
+
+    group_title = f" [{group}]" if group else ""
+    print(f"\n🔍 [관심 종목 일괄 스캐너]{group_title} {len(target_items)}개 종목 분석 중...\n")
 
     results = []
-    for t in tickers:
+    default_anchor = anchor_date or f"{datetime.now().year}-01-02"
+
+    for item in target_items:
+        t = item["ticker"]
+        name = item.get("name") or get_stock_name(t)
+        cat = item.get("category", "")
+        item_anchor = item.get("anchor") or default_anchor
+
         try:
-            stock_name = get_stock_name(t)
             df = fetch_stock_data(t, days=days)
-            if df.empty:
+            if df is None or df.empty:
                 continue
 
-            if anchor_date is None:
-                anchor_date = f"{datetime.now().year}-01-02"
-
-            df_ind = calculate_indicators(df, anchor_date=anchor_date)
+            df_ind = calculate_indicators(df, anchor_date=item_anchor)
             signals, _, _ = detect_obv_divergence(df_ind, order=order)
 
             latest = df_ind.iloc[-1]
@@ -181,10 +181,13 @@ def scan_market(
                 last_sig = signals[-1]
                 days_ago = (df_ind.index[-1] - last_sig["date"]).days
                 if days_ago <= 30:
-                    recent_signal = f"{last_sig['type'][:4]} ({days_ago}일전)"
+                    sig_name = "BULL(강세)" if last_sig["type"] == "BULLISH_DIVERGENCE" else "BEAR(약세)"
+                    recent_signal = f"{sig_name} ({days_ago}일전)"
 
             results.append({
-                "종목": stock_name,
+                "구분": cat if cat else "-",
+                "종목": name,
+                "티커": t,
                 "현재가": f"{close:,.1f}",
                 "AVWAP": f"{avwap:,.1f}" if pd.notna(avwap) else "N/A",
                 "이격률": f"{diff:+.1f}%",
@@ -195,11 +198,11 @@ def scan_market(
 
     if results:
         res_df = pd.DataFrame(results)
-        print("==========================================================================")
-        print("                         📋 시장 수급 스캔 결과")
-        print("==========================================================================")
+        print("==========================================================================================")
+        print(f"                         📋 시장 수급 스캔 결과{group_title}")
+        print("==========================================================================================")
         print(res_df.to_string(index=False))
-        print("==========================================================================")
+        print("==========================================================================================")
     else:
         print("스캔 결과가 없습니다.")
 
@@ -213,6 +216,12 @@ def main():
         type=str,
         default="005930",
         help="분석할 종목 코드 또는 티커 (기본값: 005930 삼성전자, 예: 000660, NVDA, AAPL)",
+    )
+    parser.add_argument(
+        "-g", "--group",
+        type=str,
+        default=None,
+        help="분석/스캔할 종목 그룹 (예: 보유종목, 초관심종목, 관심종목)",
     )
     parser.add_argument(
         "-a", "--anchor",
@@ -251,7 +260,7 @@ def main():
     parser.add_argument(
         "--scan",
         action="store_true",
-        help="주요 관심 종목(국내 대형주 + 미국 빅테크) 일괄 스캔 모드 실행",
+        help="관심 종목 일괄 스캔 모드 실행 (watchlist.json 기반)",
     )
     parser.add_argument(
         "-w", "--web", "--dashboard",
@@ -277,7 +286,6 @@ def main():
 
     args = parser.parse_args()
 
-
     if args.dashboard:
         import subprocess
         print("🚀 [myStock] 웹 대시보드(Streamlit)를 시작합니다...")
@@ -292,15 +300,13 @@ def main():
         print(f"결과: {res}")
     elif args.notify:
         from scheduler import run_scan_and_notify
-        run_scan_and_notify(anchor_date=args.anchor)
-
+        run_scan_and_notify(group=args.group, anchor_date=args.anchor)
     elif args.scheduler:
         from scheduler import start_scheduler_loop
         start_scheduler_loop()
     elif args.scan:
-        scan_market(anchor_date=args.anchor, days=args.days, order=args.order)
+        scan_market(group=args.group, anchor_date=args.anchor, days=args.days, order=args.order)
     else:
-
         analyze_stock(
             ticker=args.ticker,
             anchor_date=args.anchor,
@@ -314,4 +320,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

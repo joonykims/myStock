@@ -23,53 +23,60 @@ if sys.platform.startswith("win"):
     except Exception:
         pass
 
-from mystock.data_loader import fetch_stock_data, get_stock_name
+from mystock.data_loader import fetch_stock_data, get_stock_name, is_korean_ticker
 from mystock.indicators import calculate_indicators
 from mystock.divergence import detect_obv_divergence
 from mystock.notifier import NotificationManager
-
-DEFAULT_TICKERS = [
-    # 국내 대형주
-    "005930",  # 삼성전자
-    "000660",  # SK하이닉스
-    "005380",  # 현대차
-    "373220",  # LG에너지솔루션
-    "035420",  # NAVER
-    "035720",  # 카카오
-    # 미국 주요 기술주 / ETF
-    "NVDA",
-    "AAPL",
-    "MSFT",
-    "TSLA",
-    "QQQ",
-    "SPY",
-]
+from mystock.watchlist import load_watchlist, get_all_tickers
 
 
 def run_scan_and_notify(
     tickers: list = None,
+    group: str = None,
     anchor_date: str = None,
     signal_lookback_days: int = 7,
     title: str = "📈 [myStock] 수급 신호 감지 알림",
 ) -> list:
-    """Scan market tickers and send notification if recent divergence signals are detected."""
-    if tickers is None or len(tickers) == 0:
-        tickers = DEFAULT_TICKERS
+    """
+    Scan market tickers and send notification if recent divergence signals are detected.
+    Supports watchlist categories (보유종목, 초관심종목, 관심종목).
+    """
+    watchlist = load_watchlist()
 
-    if anchor_date is None:
-        anchor_date = f"{datetime.now().year}-01-02"
+    # Determine target list
+    target_items = []
+    if tickers:
+        for t in tickers:
+            target_items.append({"ticker": t, "name": get_stock_name(t), "category": "사용자지정", "anchor": anchor_date})
+    elif group:
+        items = watchlist.get(group, [])
+        for it in items:
+            t = it["ticker"] if isinstance(it, dict) else str(it)
+            n = it.get("name", t) if isinstance(it, dict) else t
+            a = it.get("anchor", anchor_date) if isinstance(it, dict) else anchor_date
+            target_items.append({"ticker": t, "name": n, "category": group, "anchor": a})
+    else:
+        # Load all from watchlist
+        target_items = get_all_tickers()
 
-    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔍 시장 수급 스캔 및 알림 검사 시작 ({len(tickers)}개 종목)...")
+    group_label = f" [{group}]" if group else ""
+    print(f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🔍 시장 수급 스캔 및 알림 검사 시작{group_label} ({len(target_items)}개 종목)...")
 
     alert_items = []
-    for t in tickers:
+    default_anchor = anchor_date or f"{datetime.now().year}-01-02"
+
+    for item in target_items:
+        t = item["ticker"]
+        name = item.get("name") or get_stock_name(t)
+        cat = item.get("category", "")
+        item_anchor = item.get("anchor") or default_anchor
+
         try:
-            name = get_stock_name(t)
             df = fetch_stock_data(t, days=365)
             if df is None or df.empty:
                 continue
 
-            df_ind = calculate_indicators(df, anchor_date=anchor_date)
+            df_ind = calculate_indicators(df, anchor_date=item_anchor)
             signals, _, _ = detect_obv_divergence(df_ind, order=5)
 
             cur = df_ind.iloc[-1]
@@ -83,8 +90,9 @@ def run_scan_and_notify(
                     days_ago = (df_ind.index[-1] - s["date"]).days
                     if days_ago <= signal_lookback_days:
                         sig_type_kor = "★ 강세 다이버전스 (스마트머니 매집)" if s["type"] == "BULLISH_DIVERGENCE" else "⚠️ 약세 다이버전스 (고점 분산/차익실현)"
+                        cat_tag = f"[{cat}] " if cat else ""
                         alert_items.append({
-                            "stock": f"{name} ({t})",
+                            "stock": f"{cat_tag}{name} ({t})",
                             "price": f"{p_close:,.2f}",
                             "avwap": f"{p_avwap:,.2f}" if pd.notna(p_avwap) else "N/A",
                             "diff": f"{diff:+.1f}%",
@@ -105,6 +113,7 @@ def run_scan_and_notify(
     results = notifier.broadcast(msg)
     print(f"📡 알림 발송 결과: {results}")
     return alert_items
+
 
 
 def start_scheduler_loop():

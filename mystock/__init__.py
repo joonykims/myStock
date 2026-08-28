@@ -7,6 +7,14 @@ from .indicators import calculate_avwap, calculate_obv, calculate_indicators
 from .divergence import detect_obv_divergence
 from .visualizer import create_stock_chart, create_stock_figure
 from .notifier import NotificationManager
+from .watchlist import (
+    load_watchlist,
+    save_watchlist,
+    get_category_tickers,
+    get_all_tickers,
+    add_ticker_to_category,
+    remove_ticker_from_category,
+)
 
 __all__ = [
     "fetch_stock_data",
@@ -18,6 +26,13 @@ __all__ = [
     "create_stock_chart",
     "create_stock_figure",
     "NotificationManager",
+    "load_watchlist",
+    "save_watchlist",
+    "get_category_tickers",
+    "get_all_tickers",
+    "add_ticker_to_category",
+    "remove_ticker_from_category",
 ]
+
 
 
