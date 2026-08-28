@@ -13,7 +13,10 @@ from mystock.watchlist import (
     get_all_tickers,
     add_ticker_to_category,
     remove_ticker_from_category,
+    move_ticker_between_categories,
+    copy_ticker_between_categories,
 )
+
 
 # 1. Page Configuration
 st.set_page_config(
@@ -403,6 +406,8 @@ with tab_manage:
         st.markdown(f"#### 📁 {cat_name} ({len(items)}개)")
         if items:
             c_cols = st.columns(3)
+            other_cats = [c for c in available_categories if c != cat_name]
+
             for idx, it in enumerate(items):
                 t_code = it["ticker"] if isinstance(it, dict) else str(it)
                 t_name = it.get("name", t_code) if isinstance(it, dict) else t_code
@@ -410,19 +415,48 @@ with tab_manage:
                 t_anchor = it.get("anchor", "") if isinstance(it, dict) else ""
 
                 with c_cols[idx % 3]:
-                    st.markdown(f"""
-                    <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 10px;">
-                        <b>{t_name}</b> <span style="color:#94a3b8">({t_code})</span><br>
-                        <small style="color:#64748b">앵커일: {t_anchor if t_anchor else '연초'}</small><br>
-                        <small style="color:#38bdf8">{t_memo}</small>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    if st.button(f"🗑️ 삭제: {t_code}", key=f"del_{cat_name}_{t_code}"):
-                        remove_ticker_from_category(cat_name, t_code)
-                        st.cache_data.clear()
-                        st.rerun()
+                    with st.container():
+                        st.markdown(f"""
+                        <div style="background-color: #1e293b; padding: 12px; border-radius: 8px; border: 1px solid #334155; margin-bottom: 8px;">
+                            <b>{t_name}</b> <span style="color:#94a3b8">({t_code})</span><br>
+                            <small style="color:#64748b">앵커일: {t_anchor if t_anchor else '연초'}</small><br>
+                            <small style="color:#38bdf8">{t_memo if t_memo else '메모 없음'}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        if other_cats:
+                            sel_target = st.selectbox(
+                                "대상 그룹",
+                                options=other_cats,
+                                key=f"target_grp_{cat_name}_{t_code}",
+                                label_visibility="collapsed",
+                            )
+                            btn_col1, btn_col2, btn_col3 = st.columns(3)
+                            with btn_col1:
+                                if st.button(f"➡️ 이동", key=f"mov_{cat_name}_{t_code}", use_container_width=True):
+                                    move_ticker_between_categories(cat_name, sel_target, t_code)
+                                    st.success(f"'{sel_target}'(으)로 이동 완료!")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                            with btn_col2:
+                                if st.button(f"📋 복사", key=f"cpy_{cat_name}_{t_code}", use_container_width=True):
+                                    copy_ticker_between_categories(cat_name, sel_target, t_code)
+                                    st.success(f"'{sel_target}'(으)로 복사 완료!")
+                                    st.cache_data.clear()
+                                    st.rerun()
+                            with btn_col3:
+                                if st.button(f"🗑️ 삭제", key=f"del_{cat_name}_{t_code}", use_container_width=True):
+                                    remove_ticker_from_category(cat_name, t_code)
+                                    st.cache_data.clear()
+                                    st.rerun()
+                        else:
+                            if st.button(f"🗑️ 삭제: {t_code}", key=f"del_{cat_name}_{t_code}", use_container_width=True):
+                                remove_ticker_from_category(cat_name, t_code)
+                                st.cache_data.clear()
+                                st.rerun()
         else:
             st.info("등록된 종목이 없습니다.")
+
 
 # --- TAB 4: Guide ---
 with tab_guide:

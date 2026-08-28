@@ -160,3 +160,80 @@ def remove_ticker_from_category(
     ]
 
     return save_watchlist(watchlist, file_path)
+
+
+def move_ticker_between_categories(
+    source_category: str,
+    target_category: str,
+    ticker: str,
+    file_path: Optional[str] = None,
+) -> bool:
+    """Move a ticker from source_category to target_category."""
+    watchlist = load_watchlist(file_path)
+    if source_category not in watchlist:
+        return False
+
+    clean_ticker = ticker.strip().upper()
+    found_item = None
+    new_source_list = []
+
+    for item in watchlist[source_category]:
+        t = item.get("ticker", "").strip().upper() if isinstance(item, dict) else str(item).strip().upper()
+        if t == clean_ticker:
+            found_item = item
+        else:
+            new_source_list.append(item)
+
+    if not found_item:
+        return False
+
+    watchlist[source_category] = new_source_list
+
+    if target_category not in watchlist:
+        watchlist[target_category] = []
+
+    # Remove from target if already there before adding
+    watchlist[target_category] = [
+        item for item in watchlist[target_category]
+        if (item.get("ticker", "").strip().upper() if isinstance(item, dict) else str(item).strip().upper()) != clean_ticker
+    ]
+    watchlist[target_category].append(found_item)
+
+    return save_watchlist(watchlist, file_path)
+
+
+def copy_ticker_between_categories(
+    source_category: str,
+    target_category: str,
+    ticker: str,
+    file_path: Optional[str] = None,
+) -> bool:
+    """Copy a ticker from source_category to target_category (preserves in source)."""
+    watchlist = load_watchlist(file_path)
+    if source_category not in watchlist:
+        return False
+
+    clean_ticker = ticker.strip().upper()
+    found_item = None
+
+    for item in watchlist[source_category]:
+        t = item.get("ticker", "").strip().upper() if isinstance(item, dict) else str(item).strip().upper()
+        if t == clean_ticker:
+            found_item = dict(item) if isinstance(item, dict) else {"ticker": str(item), "name": str(item)}
+            break
+
+    if not found_item:
+        return False
+
+    if target_category not in watchlist:
+        watchlist[target_category] = []
+
+    # Replace or add in target
+    watchlist[target_category] = [
+        item for item in watchlist[target_category]
+        if (item.get("ticker", "").strip().upper() if isinstance(item, dict) else str(item).strip().upper()) != clean_ticker
+    ]
+    watchlist[target_category].append(found_item)
+
+    return save_watchlist(watchlist, file_path)
+

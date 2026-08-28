@@ -14,6 +14,8 @@ from .watchlist import (
     get_all_tickers,
     add_ticker_to_category,
     remove_ticker_from_category,
+    move_ticker_between_categories,
+    copy_ticker_between_categories,
 )
 
 __all__ = [
@@ -32,7 +34,10 @@ __all__ = [
     "get_all_tickers",
     "add_ticker_to_category",
     "remove_ticker_from_category",
+    "move_ticker_between_categories",
+    "copy_ticker_between_categories",
 ]
+
 
 
 

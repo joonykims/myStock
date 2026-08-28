@@ -118,6 +118,18 @@ class TestMyStock(unittest.TestCase):
             all_t = get_all_tickers(file_path=test_file)
             self.assertTrue(any(it["ticker"] == "005930" for it in all_t))
 
+            # Test copy ticker
+            from mystock.watchlist import move_ticker_between_categories, copy_ticker_between_categories
+            add_ticker_to_category("관심종목", "NVDA", name="엔비디아", file_path=test_file)
+            copy_ticker_between_categories("관심종목", "초관심종목", "NVDA", file_path=test_file)
+            self.assertIn("NVDA", get_category_tickers("관심종목", file_path=test_file))
+            self.assertIn("NVDA", get_category_tickers("초관심종목", file_path=test_file))
+
+            # Test move ticker
+            move_ticker_between_categories("관심종목", "보유종목", "NVDA", file_path=test_file)
+            self.assertNotIn("NVDA", get_category_tickers("관심종목", file_path=test_file))
+            self.assertIn("NVDA", get_category_tickers("보유종목", file_path=test_file))
+
             # Test removing ticker
             remove_ticker_from_category("보유종목", "005930", file_path=test_file)
             tickers_after = get_category_tickers("보유종목", file_path=test_file)
@@ -125,6 +137,7 @@ class TestMyStock(unittest.TestCase):
         finally:
             if os.path.exists(test_file):
                 os.remove(test_file)
+
 
 
 if __name__ == "__main__":
