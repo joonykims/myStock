@@ -1,6 +1,18 @@
 # 📝 myStock 변경 및 개선 이력 (Changelog)
 
+## [v1.6.0] - 2026-08-28
+### 🚀 영문 혼합 KRX 특수 종목 코드(ETN/상품ETF 등) 데이터 수집 지원
+- **종목 코드 판별 정규식 고도화 (`mystock/data_loader.py`)**:
+  - `is_korean_ticker()` 정규식을 기존 순수 6자리 숫자(`^\d{6}$`)에서 영문이 포함된 KRX 표준 6자리 코드(`^\d[0-9A-Z]{5}$`, 예: `0072R0` TIGER KRX금현물) 및 `A` 접두사 코드까지 포괄하도록 확장
+- **종목명 조회 다계층 폴백 구조 구축 (`get_stock_name`)**:
+  - `watchlist.json` 사용자 정의 이름 ➔ `pykrx` 주식명 ➔ `pykrx` ETF명 ➔ 기본 티커 순차 조회로 영문 혼합 상품명 완벽 지원
+- **데이터 로딩 검증**:
+  - `0072R0` (TIGER KRX금현물) 365일 OHLCV 수집, AVWAP, OBV 및 다이버전스 분석 정상화 완료
+
+---
+
 ## [v1.5.0] - 2026-08-28
+
 ### 🔄 종목 그룹 간 이동(Move) 및 복사(Copy) 기능 구현
 - **종목 그룹 간 이동 및 복사 API (`mystock/watchlist.py`)**:
   - `move_ticker_between_categories(source, target, ticker)`: 원본 그룹에서 대상 그룹으로 종목 이전

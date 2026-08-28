@@ -24,26 +24,63 @@ except ImportError:
 
 
 def is_korean_ticker(ticker: str) -> bool:
-    """Check if the ticker is a Korean stock (e.g. 6-digit numeric string)."""
+    """
+    Check if the ticker is a Korean stock or ETF/ETN (6-digit numeric/alphanumeric or .KS/.KQ).
+    Supports standard 6-digit codes (e.g. 005930), alphanumeric ETF/ETN codes (e.g. 0072R0),
+    and A-prefixed codes (e.g. A0072R0).
+    """
     clean_ticker = ticker.strip().upper()
-    return bool(re.match(r"^\d{6}$", clean_ticker)) or clean_ticker.endswith(".KS") or clean_ticker.endswith(".KQ")
+    if clean_ticker.endswith(".KS") or clean_ticker.endswith(".KQ"):
+        return True
+    if clean_ticker.startswith("A") and len(clean_ticker) == 7 and re.match(r"^A[0-9A-Z]{6}$", clean_ticker):
+        return True
+    # Standard KRX codes: 6 alphanumeric characters starting with digits
+    if re.match(r"^\d[0-9A-Z]{5}$", clean_ticker) or re.match(r"^\d{6}$", clean_ticker):
+        return True
+    return False
 
 
 def get_stock_name(ticker: str) -> str:
-    """Get human-readable stock name."""
+    """Get human-readable stock name with watchlist and pykrx fallbacks."""
     clean_ticker = ticker.strip().upper()
+    pure_code = clean_ticker.replace(".KS", "").replace(".KQ", "")
+    if pure_code.startswith("A") and len(pure_code) == 7:
+        pure_code = pure_code[1:]
+
+    # 1. Check watchlist.json for custom name
+    try:
+        from .watchlist import load_watchlist
+        wl = load_watchlist()
+        for cat, items in wl.items():
+            for it in items:
+                if isinstance(it, dict) and it.get("ticker", "").strip().upper() == pure_code:
+                    n = it.get("name")
+                    if n and n != pure_code:
+                        return f"{n} ({pure_code})"
+    except Exception:
+        pass
+
+    # 2. Check pykrx for Korean stocks and ETFs
     if is_korean_ticker(clean_ticker):
-        pure_code = clean_ticker.replace(".KS", "").replace(".KQ", "")
         if PYKRX_AVAILABLE:
             try:
-                with contextlib.redirect_stderr(io.StringIO()):
+                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
                     name = krx.get_market_ticker_name(pure_code)
-                if name:
-                    return f"{name} ({pure_code})"
+                if isinstance(name, str) and name.strip():
+                    return f"{name.strip()} ({pure_code})"
+            except Exception:
+                pass
+            try:
+                with contextlib.redirect_stderr(io.StringIO()), contextlib.redirect_stdout(io.StringIO()):
+                    name = krx.get_etf_ticker_name(pure_code)
+                if isinstance(name, str) and name.strip():
+                    return f"{name.strip()} ({pure_code})"
             except Exception:
                 pass
         return f"KRX:{pure_code}"
+
     return clean_ticker
+
 
 
 def _standardize_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame:
