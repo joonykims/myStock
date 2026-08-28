@@ -120,7 +120,8 @@ else:
         ]
 
     option_keys = []
-    for idx, item in enumerate(target_list):
+    ticker_to_label = {}
+    for item in target_list:
         t = item["ticker"]
         n = item.get("name", t)
         cat = item.get("category", "")
@@ -128,15 +129,29 @@ else:
         label = f"{cat_badge}{n} ({t})"
         stock_options[label] = item
         option_keys.append(label)
-        if t.upper() == st.session_state["selected_ticker"].upper():
-            default_index = idx
+        ticker_to_label[t.upper()] = label
 
     if stock_options:
-        selected_label = st.sidebar.selectbox(
+        # If ticker was set programmatically (e.g. scanner button), sync the widget key.
+        # The flag "programmatic_ticker_change" is set by buttons before st.rerun().
+        if st.session_state.pop("programmatic_ticker_change", False):
+            desired = ticker_to_label.get(
+                st.session_state["selected_ticker"].upper(), option_keys[0]
+            )
+            st.session_state["_ticker_select_widget"] = desired
+        elif st.session_state.get("_ticker_select_widget") not in option_keys:
+            # Widget state is invalid (e.g. group changed) — reset to first valid item
+            desired = ticker_to_label.get(
+                st.session_state["selected_ticker"].upper(), option_keys[0]
+            )
+            st.session_state["_ticker_select_widget"] = desired
+
+        st.sidebar.selectbox(
             "🎯 분석할 종목 선택",
             options=option_keys,
-            index=default_index if default_index < len(option_keys) else 0,
+            key="_ticker_select_widget",
         )
+        selected_label = st.session_state["_ticker_select_widget"]
         selected_item = stock_options[selected_label]
         ticker = selected_item["ticker"]
         st.session_state["selected_ticker"] = ticker
@@ -438,6 +453,7 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
                     if st.button(f"📊 {t_name} 차트 보기", key=f"nav_chart_{t_code}_{idx}", use_container_width=True):
                         st.session_state["selected_ticker"] = t_code
                         st.session_state["active_tab"] = "📊 상세 차트 분석"
+                        st.session_state["programmatic_ticker_change"] = True
                         st.rerun()
         else:
             st.warning("스캔 데이터를 불러오지 못했습니다.")
@@ -506,6 +522,7 @@ elif st.session_state["active_tab"] == "⚙️ 보유/관심 종목 관리":
                         if st.button(f"📊 차트 보기", key=f"wl_chart_{cat_name}_{t_code}", use_container_width=True):
                             st.session_state["selected_ticker"] = t_code
                             st.session_state["active_tab"] = "📊 상세 차트 분석"
+                            st.session_state["programmatic_ticker_change"] = True
                             st.rerun()
 
                         if other_cats:
