@@ -119,7 +119,7 @@ def _standardize_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame:
     return res
 
 
-def fetch_stock_data(
+def _raw_fetch_stock_data(
     ticker: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
@@ -127,17 +127,10 @@ def fetch_stock_data(
     max_retries: int = 3,
 ) -> pd.DataFrame:
     """
-    Fetch OHLCV historical stock data for Korean or US markets with robust fallback & retry.
+    Raw OHLCV fetcher — always hits the network API (pykrx / yfinance).
 
-    Parameters:
-        ticker: Stock symbol (e.g., '005930', 'NVDA', 'AAPL', 'QQQ')
-        start_date: Start date string ('YYYY-MM-DD' or 'YYYYMMDD').
-        end_date: End date string ('YYYY-MM-DD' or 'YYYYMMDD').
-        days: Lookback period in days if start_date is not provided.
-        max_retries: Number of retry attempts on network/timeout errors.
-
-    Returns:
-        pd.DataFrame with DatetimeIndex and columns ['Open', 'High', 'Low', 'Close', 'Volume']
+    This is the internal implementation. External callers should use
+    fetch_stock_data() which wraps this with the incremental cache.
     """
     import time
 
@@ -221,4 +214,56 @@ def fetch_stock_data(
             time.sleep(0.5 * (attempt + 1))
 
     raise ValueError(f"Could not fetch stock data for ticker: '{ticker}'")
+
+
+def fetch_stock_data(
+    ticker: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    days: int = 365,
+    max_retries: int = 3,
+    use_cache: bool = True,
+) -> pd.DataFrame:
+    """
+    Fetch OHLCV historical stock data with incremental local cache.
+
+    On first call, fetches the full date range from APIs and saves to local
+    Parquet cache. On subsequent calls, loads cached data and only fetches
+    the delta (new trading days since the last cached date).
+
+    Parameters:
+        ticker: Stock symbol (e.g., '005930', 'NVDA', 'AAPL', 'QQQ')
+        start_date: Start date string ('YYYY-MM-DD' or 'YYYYMMDD').
+        end_date: End date string ('YYYY-MM-DD' or 'YYYYMMDD').
+        days: Lookback period in days if start_date is not provided.
+        max_retries: Number of retry attempts on network/timeout errors.
+        use_cache: If True (default), use incremental Parquet cache.
+                   If False, always fetch full range from API.
+
+    Returns:
+        pd.DataFrame with DatetimeIndex and columns ['Open', 'High', 'Low', 'Close', 'Volume']
+    """
+    if use_cache:
+        try:
+            from .stock_cache import get_or_fetch
+
+            return get_or_fetch(
+                ticker=ticker,
+                days=days,
+                fetch_fn=_raw_fetch_stock_data,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except Exception:
+            # If cache layer fails for any reason, fall through to raw fetch
+            pass
+
+    return _raw_fetch_stock_data(
+        ticker=ticker,
+        start_date=start_date,
+        end_date=end_date,
+        days=days,
+        max_retries=max_retries,
+    )
+
 

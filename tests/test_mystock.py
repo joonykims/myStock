@@ -139,7 +139,118 @@ class TestMyStock(unittest.TestCase):
                 os.remove(test_file)
 
 
+class TestStockCache(unittest.TestCase):
+    """Tests for the incremental Parquet cache module."""
+
+    def setUp(self):
+        import tempfile
+        import mystock.stock_cache as sc
+        self.sc = sc
+        # Redirect cache to a temp directory
+        self._orig_cache_dir = sc.CACHE_DIR
+        self._tmpdir = tempfile.mkdtemp(prefix="mystock_cache_test_")
+        sc.CACHE_DIR = __import__("pathlib").Path(self._tmpdir)
+
+        # Synthetic OHLCV data
+        dates = pd.date_range(start="2026-06-01", periods=30, freq="B")
+        np.random.seed(99)
+        close = 100 + np.cumsum(np.random.randn(30) * 2)
+        self.sample_df = pd.DataFrame({
+            "Open": close + 0.5,
+            "High": close + 1.5,
+            "Low": close - 1.0,
+            "Close": close,
+            "Volume": np.random.randint(1000, 5000, size=30),
+        }, index=dates)
+
+    def tearDown(self):
+        import shutil
+        self.sc.CACHE_DIR = self._orig_cache_dir
+        shutil.rmtree(self._tmpdir, ignore_errors=True)
+
+    def test_save_and_load(self):
+        """save_cache then get_cached_data should return identical data."""
+        self.sc.save_cache("TEST001", self.sample_df)
+        loaded = self.sc.get_cached_data("TEST001")
+        self.assertIsNotNone(loaded)
+        self.assertEqual(len(loaded), len(self.sample_df))
+        pd.testing.assert_frame_equal(loaded, self.sample_df, check_names=False, check_freq=False)
+
+    def test_load_nonexistent_returns_none(self):
+        self.assertIsNone(self.sc.get_cached_data("NONEXIST"))
+
+    def test_invalidate_single(self):
+        self.sc.save_cache("A", self.sample_df)
+        self.sc.save_cache("B", self.sample_df)
+        deleted = self.sc.invalidate_cache("A")
+        self.assertEqual(deleted, 1)
+        self.assertIsNone(self.sc.get_cached_data("A"))
+        self.assertIsNotNone(self.sc.get_cached_data("B"))
+
+    def test_invalidate_all(self):
+        self.sc.save_cache("X", self.sample_df)
+        self.sc.save_cache("Y", self.sample_df)
+        deleted = self.sc.invalidate_cache()
+        self.assertEqual(deleted, 2)
+        self.assertIsNone(self.sc.get_cached_data("X"))
+        self.assertIsNone(self.sc.get_cached_data("Y"))
+
+    def test_cache_info(self):
+        self.sc.save_cache("INFO_TEST", self.sample_df)
+        info = self.sc.get_cache_info()
+        self.assertEqual(info["ticker_count"], 1)
+        self.assertGreater(info["total_size_kb"], 0)
+        self.assertEqual(info["tickers"][0]["ticker"], "INFO_TEST")
+        self.assertEqual(info["tickers"][0]["rows"], 30)
+
+    def test_get_or_fetch_full(self):
+        """get_or_fetch with no cache should call fetch_fn and save cache."""
+        call_count = {"n": 0}
+
+        def mock_fetch(ticker, start_date, end_date, days):
+            call_count["n"] += 1
+            return self.sample_df.copy()
+
+        result = self.sc.get_or_fetch("MOCK", days=365, fetch_fn=mock_fetch)
+        self.assertEqual(call_count["n"], 1)
+        self.assertFalse(result.empty)
+        # Cache should now exist
+        cached = self.sc.get_cached_data("MOCK")
+        self.assertIsNotNone(cached)
+
+    def test_get_or_fetch_uses_cache(self):
+        """Second call to get_or_fetch should use cache (fresh data)."""
+        # Pre-populate cache with data that includes today
+        import datetime
+        dates = pd.bdate_range(
+            end=datetime.datetime.now().date(), periods=30
+        )
+        fresh_df = self.sample_df.copy()
+        fresh_df.index = dates
+        self.sc.save_cache("FRESH", fresh_df)
+
+        call_count = {"n": 0}
+
+        def mock_fetch(ticker, start_date, end_date, days):
+            call_count["n"] += 1
+            return fresh_df.copy()
+
+        result = self.sc.get_or_fetch("FRESH", days=30, fetch_fn=mock_fetch)
+        # Should NOT have called the API since cache is fresh
+        self.assertEqual(call_count["n"], 0)
+        self.assertFalse(result.empty)
+
+    def test_deduplication_on_merge(self):
+        """Merging overlapping data should not produce duplicate rows."""
+        df1 = self.sample_df.iloc[:20].copy()
+        df2 = self.sample_df.iloc[15:].copy()  # 5 rows overlap
+        self.sc.save_cache("DUP", df1)
+        merged = pd.concat([df1, df2])
+        merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+        self.sc.save_cache("DUP", merged)
+        loaded = self.sc.get_cached_data("DUP")
+        self.assertEqual(len(loaded), len(self.sample_df))
+
 
 if __name__ == "__main__":
     unittest.main()
-

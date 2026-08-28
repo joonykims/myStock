@@ -1,5 +1,23 @@
 # 📝 myStock 변경 및 개선 이력 (Changelog)
 
+## [v1.8.0] - 2026-08-28
+### ⚡ 증분 데이터 캐시(Incremental Cache) 시스템 도입 — 조회 속도 대폭 개선
+- **신규 모듈 `mystock/stock_cache.py`**:
+  - 종목별 OHLCV 데이터를 로컬 Parquet 파일(`.cache/{TICKER}.parquet`)에 자동 저장
+  - 이미 캐시된 종목은 **마지막 거래일 이후 데이터만 증분 fetch**하여 병합 → API 호출 최소화
+  - 캐시 파일 손상 시 자동 복구, 중복 데이터 자동 제거
+  - `get_or_fetch()`, `invalidate_cache()`, `get_cache_info()` API 제공
+- **`mystock/data_loader.py` 리팩터링**:
+  - 기존 API 호출 로직을 `_raw_fetch_stock_data()`로 분리
+  - `fetch_stock_data()`가 캐시 레이어를 자동 활용 (`use_cache=False`로 강제 갱신 가능)
+- **대시보드 사이드바 캐시 상태 표시 (`app.py`)**:
+  - 현재 캐시 종목 수, 용량 실시간 표시
+  - `[🔄 현재 종목 갱신]` / `[🗑️ 전체 캐시 삭제]` 버튼 제공
+- **단위 테스트 8건 추가 (`tests/test_mystock.py`)**:
+  - 저장/로드, 개별·전체 삭제, 캐시 정보, 증분 fetch, 캐시 우선 사용, 중복 제거 검증
+
+---
+
 ## [v1.7.0] - 2026-08-28
 ### 🎯 실시간 수급 스캐너 ➔ 상세 차트 원클릭 즉시 이동(Navigation) UI 구현
 - **프로그래밍 방식 동적 탭 네비게이션 (`app.py`)**:

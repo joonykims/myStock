@@ -43,3 +43,6 @@ chart_*.html
 # OS files
 .DS_Store
 Thumbs.db
+
+# Local data cache (Parquet)
+.cache/

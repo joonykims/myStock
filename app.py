@@ -202,13 +202,39 @@ st.sidebar.markdown(
     "- **약세 다이버전스(⚠️)**: 주가 고점 상승 vs OBV 고점 하락 ➔ 매도/경고 신호"
 )
 
+# --- Cache Status & Controls in Sidebar ---
+from mystock.stock_cache import get_cache_info, invalidate_cache
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**💾 데이터 캐시 상태**")
+
+cache_info = get_cache_info()
+if cache_info["ticker_count"] > 0:
+    st.sidebar.caption(
+        f"캐시 종목: **{cache_info['ticker_count']}개** · "
+        f"용량: **{cache_info['total_size_kb']:.0f} KB**"
+    )
+    cache_col1, cache_col2 = st.sidebar.columns(2)
+    with cache_col1:
+        if st.button("🔄 현재 종목 갱신", key="cache_refresh_one", use_container_width=True):
+            invalidate_cache(ticker)
+            st.cache_data.clear()
+            st.rerun()
+    with cache_col2:
+        if st.button("🗑️ 전체 캐시 삭제", key="cache_clear_all", use_container_width=True):
+            invalidate_cache()
+            st.cache_data.clear()
+            st.rerun()
+else:
+    st.sidebar.caption("캐시 없음 — 첫 조회 시 자동 생성됩니다.")
+
 # 4. Main Dashboard Header & Top Tab Navigation
 stock_name = get_stock_name(ticker)
 
 
 @st.cache_data(ttl=600, show_spinner=False)
 def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
-    """Cached wrapper for fetch_stock_data to ensure responsive UI and prevent rate limiting."""
+    """Cached wrapper — Parquet disk cache handles persistence, st.cache_data handles in-session speed."""
     return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
 
 
