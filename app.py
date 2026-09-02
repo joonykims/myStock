@@ -240,6 +240,153 @@ def load_stock_data(ticker_symbol: str, days_cnt: int) -> pd.DataFrame:
     return fetch_stock_data(ticker=ticker_symbol, days=days_cnt)
 
 
+def render_stock_chart_view(
+    target_ticker: str,
+    target_name: str,
+    anchor_date: str,
+    days_cnt: int = 365,
+    order_val: int = 3,
+    compact: bool = False,
+):
+    """Reusable component to render KPI metrics, Plotly interactive chart, and signal summary."""
+    try:
+        df = load_stock_data(ticker_symbol=target_ticker, days_cnt=days_cnt)
+        if df is None or df.empty:
+            st.warning(f"⚠️ {target_ticker} ({target_name})의 데이터를 불러오지 못했습니다.")
+            return
+
+        df_ind = calculate_indicators(df, anchor_date=anchor_date)
+        signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_val)
+
+        # KPI calculations
+        latest = df_ind.iloc[-1]
+        prev = df_ind.iloc[-2] if len(df_ind) > 1 else latest
+        latest_close = latest["Close"]
+        prev_close = prev["Close"]
+        day_change = latest_close - prev_close
+        day_change_pct = (day_change / prev_close * 100) if prev_close != 0 else 0
+
+        latest_avwap = latest["AVWAP"]
+        avwap_diff_pct = ((latest_close - latest_avwap) / latest_avwap * 100) if pd.notna(latest_avwap) else 0
+
+        latest_obv = latest["OBV"]
+        latest_obv_ema = latest["OBV_EMA"]
+
+        # Metrics layout
+        if compact:
+            m1, m2 = st.columns(2)
+            m3, m4 = st.columns(2)
+        else:
+            m1, m2, m3, m4 = st.columns(4)
+
+        with m1:
+            st.metric(
+                label="현재 종가",
+                value=f"{latest_close:,.2f}",
+                delta=f"{day_change:+,.2f} ({day_change_pct:+.2f}%)",
+            )
+
+        with m2:
+            if pd.notna(latest_avwap):
+                status_text = "상회 (지지)" if avwap_diff_pct > 0 else "하회 (저항)"
+                st.metric(
+                    label=f"AVWAP ({anchor_date}~)",
+                    value=f"{latest_avwap:,.2f}",
+                    delta=f"{avwap_diff_pct:+.2f}% ({status_text})",
+                    delta_color="normal" if avwap_diff_pct > 0 else "inverse",
+                )
+            else:
+                st.metric(label="AVWAP", value="N/A")
+
+        with m3:
+            obv_status = "단기 유입 우세" if latest_obv > latest_obv_ema else "단기 이탈 우세"
+            st.metric(
+                label="OBV 수급",
+                value=f"{latest_obv:,.0f}",
+                delta=obv_status,
+                delta_color="normal" if latest_obv > latest_obv_ema else "inverse",
+            )
+
+        with m4:
+            recent_signals = [s for s in signals if (df_ind.index[-1] - s["date"]).days <= 30]
+            if recent_signals:
+                last_sig = recent_signals[-1]
+                sig_label = "★ 강세" if last_sig["type"] == "BULLISH_DIVERGENCE" else "⚠️ 약세"
+                days_ago = (df_ind.index[-1] - last_sig["date"]).days
+                st.metric(
+                    label="최근 30일 신호",
+                    value=sig_label,
+                    delta=f"{days_ago}일 전",
+                    delta_color="normal" if last_sig["type"] == "BULLISH_DIVERGENCE" else "inverse",
+                )
+            else:
+                st.metric(
+                    label="최근 30일 신호",
+                    value="특이 신호 없음",
+                    delta="안정 추세",
+                )
+
+        # Interactive Plotly Chart
+        fig = create_stock_figure(
+            df=df_ind,
+            ticker=target_ticker,
+            stock_name=target_name,
+            signals=signals,
+            anchor_date=anchor_date,
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Signal Table
+        if compact:
+            with st.expander(f"📋 최근 다이버전스 시그널 ({len(signals)}건)", expanded=False):
+                if signals:
+                    sig_rows = []
+                    for s in reversed(signals[-5:]):
+                        is_bull = s["type"] == "BULLISH_DIVERGENCE"
+                        sig_rows.append({
+                            "일자": s["date"].strftime("%Y-%m-%d"),
+                            "유형": "★ 강세" if is_bull else "⚠️ 약세",
+                            "가격": f"{s['price']:,.2f}",
+                            "내용": s["message"],
+                        })
+                    st.dataframe(pd.DataFrame(sig_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("발생한 다이버전스 신호가 없습니다.")
+        else:
+            st.subheader(f"📋 포착된 다이버전스 시그널 목록 (최근 {days_cnt}일)")
+            if signals:
+                sig_rows = []
+                for s in reversed(signals):
+                    is_bull = s["type"] == "BULLISH_DIVERGENCE"
+                    sig_rows.append({
+                        "발생일자": s["date"].strftime("%Y-%m-%d"),
+                        "신호 유형": "★ 강세 (스마트머니 매집)" if is_bull else "⚠️ 약세 (고점 분산/차익실현)",
+                        "발생 시점 주가": f"{s['price']:,.2f}",
+                        "이전 극값 일자": s["prev_date"].strftime("%Y-%m-%d"),
+                        "이전 극값 주가": f"{s['prev_price']:,.2f}",
+                        "분석 내용": s["message"],
+                    })
+                st.dataframe(pd.DataFrame(sig_rows), use_container_width=True, hide_index=True)
+            else:
+                st.info("조회 기간 동안 발생한 다이버전스 신호가 없습니다.")
+    except Exception as e:
+        st.error(f"분석 중 오류가 발생했습니다: {e}")
+
+
+@st.dialog("📊 종목 상세 차트 (Center Peek 모달)", width="large")
+def show_chart_modal(target_ticker: str, target_name: str, anchor_date: str, days_cnt: int = 365, order_val: int = 3):
+    """Notion-style Center Peek large modal popup."""
+    st.markdown(f"### **{target_name}** (`{target_ticker}`)")
+    render_stock_chart_view(
+        target_ticker=target_ticker,
+        target_name=target_name,
+        anchor_date=anchor_date,
+        days_cnt=days_cnt,
+        order_val=order_val,
+        compact=False,
+    )
+
+
 # Top Navigation Bar
 current_tab_index = TAB_NAMES.index(st.session_state["active_tab"]) if st.session_state["active_tab"] in TAB_NAMES else 0
 selected_nav = st.radio(
@@ -264,115 +411,20 @@ if st.session_state["active_tab"] == "📊 상세 차트 분석":
     st.markdown(f"### 📊 {stock_name} 상세 수급 & 차트 분석")
 
     with st.spinner(f"[{stock_name}] 주가 및 수급 데이터를 분석 중입니다..."):
-        try:
-            df = load_stock_data(ticker_symbol=ticker, days_cnt=days_lookback)
-            if df is None or df.empty:
-                st.warning(f"⚠️ {ticker} ({stock_name})의 데이터를 불러오지 못했습니다. 종목 코드나 네트워크 상태를 확인해주세요.")
-            else:
-                df_ind = calculate_indicators(df, anchor_date=anchor_str)
-                signals, low_idx, high_idx = detect_obv_divergence(df_ind, order=order_param)
-
-                # Latest KPI calculations
-                latest = df_ind.iloc[-1]
-                prev = df_ind.iloc[-2] if len(df_ind) > 1 else latest
-                latest_close = latest["Close"]
-                prev_close = prev["Close"]
-                day_change = latest_close - prev_close
-                day_change_pct = (day_change / prev_close * 100) if prev_close != 0 else 0
-
-                latest_avwap = latest["AVWAP"]
-                avwap_diff_pct = ((latest_close - latest_avwap) / latest_avwap * 100) if pd.notna(latest_avwap) else 0
-
-                latest_obv = latest["OBV"]
-                latest_obv_ema = latest["OBV_EMA"]
-
-                # 4 Metric Cards
-                m1, m2, m3, m4 = st.columns(4)
-
-                with m1:
-                    st.metric(
-                        label="현재 종가",
-                        value=f"{latest_close:,.2f}",
-                        delta=f"{day_change:+,.2f} ({day_change_pct:+.2f}%)",
-                    )
-
-                with m2:
-                    if pd.notna(latest_avwap):
-                        status_text = "상회 (지지)" if avwap_diff_pct > 0 else "하회 (저항)"
-                        st.metric(
-                            label=f"AVWAP ({anchor_str}~)",
-                            value=f"{latest_avwap:,.2f}",
-                            delta=f"{avwap_diff_pct:+.2f}% ({status_text})",
-                            delta_color="normal" if avwap_diff_pct > 0 else "inverse",
-                        )
-                    else:
-                        st.metric(label="AVWAP", value="N/A")
-
-                with m3:
-                    obv_status = "단기 유입 우세" if latest_obv > latest_obv_ema else "단기 이탈 우세"
-                    st.metric(
-                        label="OBV 수급 상태",
-                        value=f"{latest_obv:,.0f}",
-                        delta=obv_status,
-                        delta_color="normal" if latest_obv > latest_obv_ema else "inverse",
-                    )
-
-                with m4:
-                    recent_signals = [s for s in signals if (df_ind.index[-1] - s["date"]).days <= 30]
-                    if recent_signals:
-                        last_sig = recent_signals[-1]
-                        sig_label = "★ 강세 (매수)" if last_sig["type"] == "BULLISH_DIVERGENCE" else "⚠️ 약세 (경고)"
-                        days_ago = (df_ind.index[-1] - last_sig["date"]).days
-                        st.metric(
-                            label="최근 30일 다이버전스",
-                            value=sig_label,
-                            delta=f"{days_ago}일 전 감지",
-                            delta_color="normal" if last_sig["type"] == "BULLISH_DIVERGENCE" else "inverse",
-                        )
-                    else:
-                        st.metric(
-                            label="최근 30일 다이버전스",
-                            value="특이 신호 없음",
-                            delta="안정 추세",
-                        )
-
-                # Interactive Plotly Chart
-                fig = create_stock_figure(
-                    df=df_ind,
-                    ticker=ticker,
-                    stock_name=stock_name,
-                    signals=signals,
-                    anchor_date=anchor_str,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-
-                # Signal Table
-                st.subheader(f"📋 포착된 다이버전스 시그널 목록 (최근 {days_lookback}일)")
-                if signals:
-                    sig_rows = []
-                    for s in reversed(signals):
-                        is_bull = s["type"] == "BULLISH_DIVERGENCE"
-                        sig_rows.append({
-                            "발생일자": s["date"].strftime("%Y-%m-%d"),
-                            "신호 유형": "★ 강세 (스마트머니 매집)" if is_bull else "⚠️ 약세 (고점 분산/차익실현)",
-                            "발생 시점 주가": f"{s['price']:,.2f}",
-                            "이전 극값 일자": s["prev_date"].strftime("%Y-%m-%d"),
-                            "이전 극값 주가": f"{s['prev_price']:,.2f}",
-                            "분석 내용": s["message"],
-                        })
-                    sig_table_df = pd.DataFrame(sig_rows)
-                    st.dataframe(sig_table_df, use_container_width=True, hide_index=True)
-                else:
-                    st.info("조회 기간 동안 발생한 다이버전스 신호가 없습니다.")
-        except Exception as e:
-            st.error(f"분석 중 오류가 발생했습니다: {e}")
+        render_stock_chart_view(
+            target_ticker=ticker,
+            target_name=stock_name,
+            anchor_date=anchor_str,
+            days_cnt=days_lookback,
+            order_val=order_param,
+            compact=False,
+        )
 
 # ==========================================
-# TAB 2: Multi-Stock Scanner with Direct Navigation
+# TAB 2: Multi-Stock Scanner with Notion-style Side Peek & Modal
 # ==========================================
 elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)":
     st.subheader("🔍 보유/관심 종목 그룹별 실시간 수급 스캔")
-    st.caption("종목을 클릭하거나 아래의 [📊 차트 보기] 버튼을 누르면 해당 종목의 상세 분석 차트로 즉시 이동합니다.")
 
     # Category filter pills
     scan_cat_tabs = ["전체 종목"] + available_categories
@@ -433,6 +485,7 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
                     "AVWAP": f"{p_avwap:,.2f}" if pd.notna(p_avwap) else "N/A",
                     "이격률(%)": round(diff, 2),
                     "최근 30일 신호": sig_status,
+                    "개별앵커": it.get("anchor"),
                     "메모": memo,
                 })
             except Exception:
@@ -455,6 +508,9 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
     scan_df = st.session_state[scan_cache_key]
 
     if not scan_df.empty:
+        # Check if a ticker is currently peeked in side panel
+        peek_ticker = st.session_state.get("scanner_peek_ticker", None)
+
         def style_diff(val):
             if isinstance(val, (int, float)):
                 if val > 0:
@@ -463,39 +519,112 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
                     return "color: #3b82f6; font-weight: bold;"
             return ""
 
-        st.dataframe(
-            scan_df.style.map(style_diff, subset=["이격률(%)"]),
-            use_container_width=True,
-            hide_index=True,
-        )
+        # Drop internal columns for clean table display
+        table_cols = [c for c in scan_df.columns if c != "개별앵커"]
+        table_df = scan_df[table_cols]
 
-        # Quick Direct Navigation Cards / Buttons
-        st.markdown("### 🎯 상세 차트로 바로 이동하기")
-        st.caption("아래 종목 버튼을 클릭하시면 해당 종목의 상세 차트 분석 화면으로 즉시 전환됩니다.")
+        # Side Peek Card Styling CSS
+        st.markdown("""
+        <style>
+            .side-peek-card {
+                background-color: #0b1329 !important;
+                border: 1px solid #334155 !important;
+                border-radius: 12px !important;
+                padding: 18px 20px !important;
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4) !important;
+                margin-bottom: 20px !important;
+            }
+        </style>
+        """, unsafe_allow_html=True)
 
-        card_cols = st.columns(4)
-        for idx, row in scan_df.iterrows():
-            t_code = row["티커"]
-            t_name = row["종목명"]
-            t_diff = row["이격률(%)"]
-            t_sig = row["최근 30일 신호"]
+        # --- SIDE-BY-SIDE LAYOUT (Matches the red box area in screenshot) ---
+        if peek_ticker:
+            col_scan_list, col_side_panel = st.columns([0.43, 0.57], gap="medium")
 
-            with card_cols[idx % 4]:
-                diff_color = "#ef4444" if t_diff > 0 else "#3b82f6"
-                sig_badge = f"<span style='color:#34d399'>{t_sig}</span>" if "강세" in t_sig else (f"<span style='color:#fb7185'>{t_sig}</span>" if "약세" in t_sig else "<span style='color:#64748b'>-</span>")
+            with col_scan_list:
+                st.caption("💡 종목을 클릭하면 우측 패널 차트가 즉시 전환됩니다.")
+                event = st.dataframe(
+                    table_df.style.map(style_diff, subset=["이격률(%)"]),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=560,
+                    on_select="rerun",
+                    selection_mode="single-row",
+                )
 
-                st.markdown(f"""
-                <div style="background-color:#1e293b; padding:10px; border-radius:8px; border:1px solid #334155; margin-bottom:6px;">
-                    <b>{t_name}</b> <small style="color:#94a3b8">({t_code})</small><br>
-                    <small>AVWAP 이격: <b style="color:{diff_color}">{t_diff:+.1f}%</b></small><br>
-                    <small>신호: {sig_badge}</small>
-                </div>
-                """, unsafe_allow_html=True)
-                if st.button(f"📊 {t_name} 차트 보기", key=f"nav_chart_{t_code}_{idx}", use_container_width=True):
-                    st.session_state["selected_ticker"] = t_code
-                    st.session_state["active_tab"] = "📊 상세 차트 분석"
-                    st.session_state["programmatic_ticker_change"] = True
-                    st.rerun()
+                # Handle row selection
+                if event and event.selection and event.selection.rows:
+                    clicked_row_idx = event.selection.rows[0]
+                    new_ticker = scan_df.iloc[clicked_row_idx]["티커"]
+                    if new_ticker != peek_ticker:
+                        st.session_state["scanner_peek_ticker"] = new_ticker
+                        st.rerun()
+
+            with col_side_panel:
+                with st.container(border=True):
+                    peek_rows = scan_df[scan_df["티커"] == peek_ticker]
+                    if not peek_rows.empty:
+                        p_row = peek_rows.iloc[0]
+                        p_name = p_row["종목명"]
+                        p_anchor = p_row.get("개별앵커") or anchor_str
+                    else:
+                        p_name = get_stock_name(peek_ticker)
+                        p_anchor = anchor_str
+
+                    # Header Toolbar inside side panel
+                    tb_col1, tb_col2, tb_col3, tb_col4 = st.columns([2.2, 1.1, 1.1, 0.5])
+                    with tb_col1:
+                        st.markdown(f"#### 🔎 **{p_name}** <small style='color:#94a3b8'>({peek_ticker})</small>", unsafe_allow_html=True)
+                    with tb_col2:
+                        if st.button("⛶ 모달 확대", key="btn_peek_modal", use_container_width=True, help="중앙 대형 모달 팝업으로 차트 확대"):
+                            show_chart_modal(
+                                target_ticker=peek_ticker,
+                                target_name=p_name,
+                                anchor_date=p_anchor,
+                                days_cnt=days_lookback,
+                                order_val=order_param,
+                            )
+                    with tb_col3:
+                        if st.button("📊 상세 탭", key="btn_peek_to_tab", use_container_width=True, help="상세 차트 분석 탭으로 이동"):
+                            st.session_state["selected_ticker"] = peek_ticker
+                            st.session_state["active_tab"] = "📊 상세 차트 분석"
+                            st.session_state["programmatic_ticker_change"] = True
+                            st.rerun()
+                    with tb_col4:
+                        if st.button("✖", key="btn_peek_close", use_container_width=True, help="사이드 패널 닫기"):
+                            st.session_state["scanner_peek_ticker"] = None
+                            st.rerun()
+
+                    st.markdown("---")
+
+                    # Render compact chart inside right panel
+                    render_stock_chart_view(
+                        target_ticker=peek_ticker,
+                        target_name=p_name,
+                        anchor_date=p_anchor,
+                        days_cnt=days_lookback,
+                        order_val=order_param,
+                        compact=True,
+                    )
+
+        else:
+            # Full width table mode
+            st.caption("💡 종목 행(체크박스)을 **클릭**하면 우측에 **상세 차트 사이드 패널**이 열립니다.")
+            event = st.dataframe(
+                table_df.style.map(style_diff, subset=["이격률(%)"]),
+                use_container_width=True,
+                hide_index=True,
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+
+            # Handle row selection → open side panel
+            if event and event.selection and event.selection.rows:
+                clicked_row_idx = event.selection.rows[0]
+                clicked_ticker = scan_df.iloc[clicked_row_idx]["티커"]
+                st.session_state["scanner_peek_ticker"] = clicked_ticker
+                st.rerun()
+
     else:
         st.warning("스캔 데이터를 불러오지 못했습니다.")
 

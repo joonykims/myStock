@@ -116,9 +116,21 @@ def get_or_fetch(
         # Allow 5-day tolerance for weekends/holidays
         covers_start = cache_first_date <= start_dt + datetime.timedelta(days=5)
 
-        # Determine if cache is fresh (last cached date is today or yesterday)
         today = pd.Timestamp(now.date())
-        is_fresh = cache_last_date >= today - datetime.timedelta(days=1)
+        cache_last_dt = pd.Timestamp(cache_last_date).date()
+        today_date = now.date()
+        weekday = now.weekday()  # 0: Mon, ..., 4: Fri, 5: Sat, 6: Sun
+
+        # Market-aware freshness determination
+        is_fresh = False
+        if cache_last_dt >= today_date:
+            # Already has today's bar
+            is_fresh = True
+        elif weekday in (5, 6):
+            # Weekend: fresh if cache has Friday's data
+            last_friday = today_date - datetime.timedelta(days=(weekday - 4))
+            if cache_last_dt >= last_friday:
+                is_fresh = True
 
         if covers_start and is_fresh:
             # Cache fully covers the request — no API call needed
@@ -126,10 +138,10 @@ def get_or_fetch(
             if not result.empty:
                 return result
 
-        # Cache exists but needs updating
+        # Cache exists but is missing today's delta (or covers_start is false)
         if covers_start:
             # Only fetch the delta: from last cached date + 1 day to now
-            delta_start = (cache_last_date + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+            delta_start = (pd.Timestamp(cache_last_date) + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
             delta_end = end_dt.strftime("%Y-%m-%d")
 
             try:
@@ -146,12 +158,11 @@ def get_or_fetch(
                     result = merged[merged.index >= pd.Timestamp(start_dt)]
                     return result if not result.empty else merged
                 else:
-                    # No new data (market closed, holiday, etc.) — mark as fresh
-                    save_cache(ticker, cached)
+                    # No new trading data from API (market not closed yet, holiday, etc.)
                     result = cached[cached.index >= pd.Timestamp(start_dt)]
                     return result if not result.empty else cached
             except Exception:
-                # Delta fetch failed — use stale cache rather than failing
+                # Delta fetch failed — return existing cached data as fallback
                 result = cached[cached.index >= pd.Timestamp(start_dt)]
                 return result if not result.empty else cached
 

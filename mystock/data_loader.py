@@ -119,15 +119,71 @@ def _standardize_ohlcv_df(df: pd.DataFrame) -> pd.DataFrame:
     return res
 
 
+_HTTP_SESSION = None
+
+
+def _get_http_session():
+    """Reusable requests session with browser-like User-Agent to prevent Yahoo Finance 429/Crumb blocking."""
+    global _HTTP_SESSION
+    if _HTTP_SESSION is None:
+        import requests
+        _HTTP_SESSION = requests.Session()
+        _HTTP_SESSION.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+        })
+    return _HTTP_SESSION
+
+
+def _fetch_yahoo_direct(
+    ticker: str,
+    start_dt: datetime.datetime,
+    end_dt: datetime.datetime,
+    timeout: int = 5,
+) -> Optional[pd.DataFrame]:
+    """
+    Directly query Yahoo Finance v8 Chart API for ultra-fast, robust OHLCV data.
+    Bypasses yfinance crumb/cookie issues and downloads in < 1 second.
+    """
+    session = _get_http_session()
+    p1 = int(start_dt.timestamp())
+    p2 = int((end_dt + datetime.timedelta(days=1)).timestamp())
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?period1={p1}&period2={p2}&interval=1d&includePrePost=false"
+    try:
+        resp = session.get(url, timeout=timeout)
+        if resp.status_code == 200:
+            data = resp.json()
+            results = data.get("chart", {}).get("result")
+            if results and len(results) > 0:
+                item = results[0]
+                timestamps = item.get("timestamp")
+                quote = item.get("indicators", {}).get("quote", [{}])[0]
+                if timestamps and quote and "close" in quote:
+                    raw_df = pd.DataFrame({
+                        "Open": quote.get("open"),
+                        "High": quote.get("high"),
+                        "Low": quote.get("low"),
+                        "Close": quote.get("close"),
+                        "Volume": quote.get("volume"),
+                    }, index=pd.to_datetime(timestamps, unit="s"))
+                    std_df = _standardize_ohlcv_df(raw_df)
+                    if not std_df.empty:
+                        return std_df
+    except Exception:
+        pass
+    return None
+
+
 def _raw_fetch_stock_data(
     ticker: str,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     days: int = 365,
-    max_retries: int = 3,
+    max_retries: int = 2,
 ) -> pd.DataFrame:
     """
-    Raw OHLCV fetcher — always hits the network API (pykrx / yfinance).
+    Raw OHLCV fetcher — always hits the network API (pykrx / direct Yahoo API / yfinance).
 
     This is the internal implementation. External callers should use
     fetch_stock_data() which wraps this with the incremental cache.
@@ -162,56 +218,49 @@ def _raw_fetch_stock_data(
             except Exception:
                 time.sleep(0.3 * (attempt + 1))
 
-    # Strategy 2: Fetch via yfinance (US stock or fallback for KRX stock)
-    if YFINANCE_AVAILABLE:
-        yf_ticker = clean_ticker
-        if is_korean_ticker(clean_ticker) and not clean_ticker.endswith(".KS") and not clean_ticker.endswith(".KQ"):
-            yf_ticker = f"{clean_ticker}.KS"
+    # Strategy 2: Ultra-fast Direct Yahoo API + yfinance fallback (US stocks & KRX fallback)
+    yf_ticker = clean_ticker
+    if is_korean_ticker(clean_ticker) and not clean_ticker.endswith(".KS") and not clean_ticker.endswith(".KQ"):
+        yf_ticker = f"{clean_ticker}.KS"
 
-        s_str = start_dt.strftime("%Y-%m-%d")
-        e_str = (end_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    for attempt in range(max_retries):
+        # Attempt 2.1: Direct Yahoo Finance v8 Chart API (fastest, < 1s, bypasses crumb/blocking)
+        direct_df = _fetch_yahoo_direct(yf_ticker, start_dt, end_dt, timeout=5)
+        if direct_df is not None and not direct_df.empty:
+            return direct_df
 
-        for attempt in range(max_retries):
-            # Attempt 2.1: yf.download with start and end
+        # Attempt 2.2: yf.Ticker with custom session
+        if YFINANCE_AVAILABLE:
             try:
-                df = yf.download(yf_ticker, start=s_str, end=e_str, progress=False, timeout=10)
+                session = _get_http_session()
+                t_obj = yf.Ticker(yf_ticker, session=session)
+                period_str = f"{max(days, 30)}d" if days <= 730 else "5y"
+                df = t_obj.history(period=period_str, auto_adjust=False, timeout=5)
+                std_df = _standardize_ohlcv_df(df)
+                if not std_df.empty:
+                    std_df = std_df[std_df.index >= pd.to_datetime(start_dt.strftime("%Y-%m-%d"))]
+                    if not std_df.empty:
+                        return std_df
+            except Exception:
+                pass
+
+            # Attempt 2.3: yf.download with custom session
+            try:
+                session = _get_http_session()
+                s_str = start_dt.strftime("%Y-%m-%d")
+                e_str = (end_dt + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+                df = yf.download(yf_ticker, start=s_str, end=e_str, progress=False, timeout=5, session=session)
                 std_df = _standardize_ohlcv_df(df)
                 if not std_df.empty:
                     return std_df
             except Exception:
                 pass
 
-            # Attempt 2.2: yf.Ticker.history with period
-            try:
-                t_obj = yf.Ticker(yf_ticker)
-                period_str = f"{max(days, 30)}d" if days <= 730 else "5y"
-                df = t_obj.history(period=period_str, auto_adjust=False, timeout=10)
-                std_df = _standardize_ohlcv_df(df)
-                if not std_df.empty:
-                    # Filter to start_dt
-                    std_df = std_df[std_df.index >= pd.to_datetime(s_str)]
-                    if not std_df.empty:
-                        return std_df
-            except Exception:
-                pass
+        # If Korean stock failed on KOSPI (.KS), try KOSDAQ (.KQ)
+        if is_korean_ticker(clean_ticker) and yf_ticker.endswith(".KS"):
+            yf_ticker = f"{clean_ticker.replace('.KS', '')}.KQ"
 
-            # Attempt 2.3: yf.download with period
-            try:
-                period_str = f"{max(days, 30)}d" if days <= 730 else "5y"
-                df = yf.download(yf_ticker, period=period_str, progress=False, timeout=10)
-                std_df = _standardize_ohlcv_df(df)
-                if not std_df.empty:
-                    std_df = std_df[std_df.index >= pd.to_datetime(s_str)]
-                    if not std_df.empty:
-                        return std_df
-            except Exception:
-                pass
-
-            # If Korean stock failed on KOSPI (.KS), try KOSDAQ (.KQ)
-            if is_korean_ticker(clean_ticker) and yf_ticker.endswith(".KS"):
-                yf_ticker = f"{clean_ticker.replace('.KS', '')}.KQ"
-
-            time.sleep(0.5 * (attempt + 1))
+        time.sleep(0.3 * (attempt + 1))
 
     raise ValueError(f"Could not fetch stock data for ticker: '{ticker}'")
 
