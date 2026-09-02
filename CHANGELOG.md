@@ -1,5 +1,17 @@
 # 📝 myStock 변경 및 개선 이력 (Changelog)
 
+## [v1.9.3] - 2026-09-02
+### ⏰ GitHub Actions 24시간 완전 자동 시장 알림 스케줄러 구축
+- **클라우드 무중단 스케줄러 (`.github/workflows/market_scheduler.yml`)**:
+  - 내 PC를 켜둘 필요 없이 GitHub 무료 크론 서버를 통해 정시 자동 스캔 & 텔레그램 리포트 발송
+  - **국내장 마감 알림**: 매주 월~금 **15:45 KST** (UTC 06:45)
+  - **미국장 마감 알림**: 매주 화~토 **06:30 KST** (UTC 21:30)
+  - **수동 즉시 실행 지원 (`workflow_dispatch`)**: GitHub Actions 웹 콘솔에서 버튼 클릭 한 번으로 언제든 테스트 발송 가능
+- **보안 비밀키(`GitHub Secrets`) 연동**:
+  - `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`를 안전하게 주입받아 동작
+
+---
+
 ## [v1.9.2] - 2026-09-01
 ### 🔄 평일 당일 종가(Today's Close) 증분 갱신 판정 로직 수정
 - **캐시 신선도(Freshness) 판정 로직 개선 (`mystock/stock_cache.py`)**:
