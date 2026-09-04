@@ -1,16 +1,16 @@
 name: myStock Market Alert Scheduler
 
 on:
-  schedule:
-    # 1. 아침 개장 전 모닝 브리핑: 매주 월~금 07:50 KST (UTC 일~목 22:50)
-    - cron: '50 22 * * 0-4'
-    # 2. 국내장 마감 정기 알림: 매주 월~금 15:45 KST (UTC 06:45)
-    - cron: '45 6 * * 1-5'
-    # 3. 미국장 마감 정기 알림: 매주 화~토 06:30 KST (UTC 월~금 21:30)
-    - cron: '30 21 * * 1-5'
-
-  # GitHub 웹 화면에서 'Run workflow' 버튼으로 언제든 수동 즉시 실행 가능
+  # cron-job.org 등 외부 정밀 크론 서비스 및 GitHub API 즉시 트리거
   workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: '다이버전스 신호 탐색 기간(일)'
+        required: false
+        default: '7'
+        type: string
+  repository_dispatch:
+    types: [trigger-market-alert]
     inputs:
       lookback_days:
         description: '다이버전스 신호 탐색 기간(일)'

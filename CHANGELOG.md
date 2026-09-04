@@ -1,5 +1,13 @@
 # 📝 myStock 변경 및 개선 이력 (Changelog)
 
+## [v1.9.4] - 2026-09-04
+### 🎯 cron-job.org 연동을 통한 지연 없는 정밀 웹훅 트리거 전환
+- **지연 없는 정시 실행 구조 (`cron-job.org ➔ GitHub API`)**:
+  - GitHub Actions 자체 크론의 대기열 딜레이(15~60분)를 해결하기 위해 내부 `schedule:` 제거
+  - `workflow_dispatch` 및 `repository_dispatch` 웹훅 엔드포인트를 열어 `cron-job.org`에서 초 단위로 정확한 시점에 즉각 트리거 가능하도록 전환
+
+---
+
 ## [v1.9.3] - 2026-09-02
 ### ⏰ GitHub Actions 24시간 완전 자동 시장 알림 스케줄러 구축
 - **클라우드 무중단 스케줄러 (`.github/workflows/market_scheduler.yml`)**:
