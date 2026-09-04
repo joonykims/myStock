@@ -139,9 +139,30 @@ python main.py --notify -g 초관심종목
 
 ---
 
-## ⏰ OS 스케줄러 등록 방법 (무중단 자동화)
+## ⏰ 자동화 스케줄러 등록 방법 (무중단 알림)
 
-### Windows 작업 스케줄러 (Task Scheduler) 등록
+### 1. GitHub Actions + cron-job.org 클라우드 스케줄러 (PC 종료 상태 지원)
+PC를 켜둘 필요 없이 GitHub 무료 러너와 외부 정밀 크론 서비스를 연동하여 정시에 자동 알림을 발송합니다.
+
+- **저장소 Secrets 설정**: GitHub 저장소 `Settings > Secrets and variables > Actions`에 메신저 키(`TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SLACK_WEBHOOK_URL`, `DISCORD_WEBHOOK_URL`) 등록
+- **수동 즉시 실행 (`workflow_dispatch`)**: GitHub Actions 탭 ➔ `myStock Market Alert Scheduler` ➔ `Run workflow` (탐색 기간 `lookback_days` 지정 가능)
+- **외부 정밀 웹훅 트리거 (`repository_dispatch`)**: [cron-job.org](https://cron-job.org) 등에서 원하는 시간(예: 평일 15:45 KST, 06:30 KST)에 아래 웹훅 호출:
+  - **Method**: `POST`
+  - **URL**: `https://api.github.com/repos/<OWNER>/<REPO>/dispatches`
+  - **Headers**:
+    - `Accept: application/vnd.github+json`
+    - `Authorization: Bearer <GITHUB_PERSONAL_ACCESS_TOKEN>`
+  - **Body (JSON)**:
+    ```json
+    {
+      "event_type": "trigger-market-alert",
+      "client_payload": {
+        "lookback_days": "7"
+      }
+    }
+    ```
+
+### 2. 로컬 Windows 작업 스케줄러 (Task Scheduler) 등록
 1. `Win + R` ➔ `taskschd.msc` 실행
 2. **기본 작업 만들기** 클릭
 3. **트리거**: 매일 (월~금 오후 3시 45분 / 화~토 아침 6시 30분)
@@ -150,7 +171,7 @@ python main.py --notify -g 초관심종목
    - 인수 추가: `main.py --notify`
    - 시작 위치: `G:\Dev\myStock`
 
-### Linux / macOS Crontab 등록
+### 3. 로컬 Linux / macOS Crontab 등록
 ```bash
 # crontab -e
 # 국내장 마감 알림: 매주 월~금 15:45
@@ -166,11 +187,14 @@ python main.py --notify -g 초관심종목
 
 ```
 myStock/
+├── .github/workflows/
+│   └── market_scheduler.yml # GitHub Actions 클라우드 알림 워크플로
 ├── app.py                # Streamlit 인터랙티브 웹 대시보드
 ├── scheduler.py          # 자동 스케줄러 및 알림 발송 엔진
 ├── mystock/
 │   ├── __init__.py       # 모듈 진입점
 │   ├── data_loader.py    # 3단계 폴백 + 지수 백오프 데이터 수집기
+│   ├── stock_cache.py    # Parquet 기반 증분 데이터 캐시 레이어
 │   ├── indicators.py     # AVWAP, OBV, SMA 연산 모듈
 │   ├── divergence.py     # Scipy 기반 다이버전스 자동 감지 엔진
 │   ├── visualizer.py     # Plotly 인터랙티브 차트 생성기

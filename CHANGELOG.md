@@ -5,6 +5,9 @@
 - **지연 없는 정시 실행 구조 (`cron-job.org ➔ GitHub API`)**:
   - GitHub Actions 자체 크론의 대기열 딜레이(15~60분)를 해결하기 위해 내부 `schedule:` 제거
   - `workflow_dispatch` 및 `repository_dispatch` 웹훅 엔드포인트를 열어 `cron-job.org`에서 초 단위로 정확한 시점에 즉각 트리거 가능하도록 전환
+- **`repository_dispatch` 워크플로 문법 오류 수정 및 파라미터 연동 개선 (`.github/workflows/market_scheduler.yml`)**:
+  - GitHub Actions 스키마 상 `repository_dispatch`에서 지원하지 않는 `inputs:` 블록 제거 (`Unexpected value 'inputs'` 오류 해결)
+  - `workflow_dispatch`(수동 실행) 및 `repository_dispatch`(웹훅 `client_payload`) 파라미터를 모두 지원하도록 탐색 기간(`DAYS`) 할당 로직 개선 (`${{ github.event.inputs.lookback_days || github.event.client_payload.lookback_days || '7' }}`)
 
 ---
 

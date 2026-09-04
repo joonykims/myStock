@@ -11,12 +11,6 @@ on:
         type: string
   repository_dispatch:
     types: [trigger-market-alert]
-    inputs:
-      lookback_days:
-        description: '다이버전스 신호 탐색 기간(일)'
-        required: false
-        default: '7'
-        type: string
 
 jobs:
   run-market-alert:
@@ -45,5 +39,5 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: |
-          DAYS="${{ github.event.inputs.lookback_days || '7' }}"
+          DAYS="${{ github.event.inputs.lookback_days || github.event.client_payload.lookback_days || '7' }}"
           python scheduler.py --now --days $DAYS
