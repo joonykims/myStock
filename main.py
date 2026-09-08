@@ -207,6 +207,76 @@ def scan_market(
         print("스캔 결과가 없습니다.")
 
 
+def run_leader_scan(
+    universe: str = "korea",
+    group: str = None,
+    anchor_date: str = None,
+    benchmark_ticker: str = None,
+    target_date: str = None,
+    min_score: float = 55.0,
+    days: int = 120,
+):
+    """Run Lee Kwang-soo Leading Stocks Relative Strength Scanner."""
+    from mystock.scanner import scan_market_leaders
+    from mystock.watchlist import load_watchlist
+
+    custom_tickers = None
+    if group:
+        wl = load_watchlist()
+        custom_tickers = wl.get(group, [])
+        univ_label = f"관심그룹 [{group}]"
+    else:
+        univ_label = f"유니버스 [{universe}]"
+
+    print(f"\n==========================================================================================")
+    print(f" 👑 [이광수식 주도주 스캐너] {univ_label} 분석 시작...")
+    print(f"==========================================================================================")
+
+    scan_res = scan_market_leaders(
+        universe_type=universe,
+        custom_tickers=custom_tickers,
+        benchmark_ticker=benchmark_ticker,
+        anchor_date=anchor_date,
+        target_date=target_date,
+        min_score=min_score,
+        days=days,
+    )
+
+    b_info = scan_res.get("benchmark_info", {})
+    if b_info:
+        down_badge = "🚨 지수 급락" if b_info.get("is_crash") else ("📉 지수 하락" if b_info.get("is_down") else "📈 지수 상승")
+        print(f"• 기준 지수: {b_info.get('ticker')} | 일자: {b_info.get('date')} | 종가: {b_info.get('close'):,.2f} ({b_info.get('change_pct'):+.2f}%) [{down_badge}]")
+
+    results = scan_res.get("results", [])
+    if not results:
+        print(f"\n기준 점수({min_score}점)를 충족하는 주도주가 없습니다.")
+        return
+
+    rows = []
+    for r in results:
+        close_fmt = f"{r['close']:,.0f}" if r["close"] >= 100 else f"{r['close']:,.2f}"
+        stop_fmt = f"{r['stop_loss_price']:,.0f}" if r["stop_loss_price"] >= 100 else f"{r['stop_loss_price']:,.2f}"
+        rows.append({
+            "등급": r["grade_badge"],
+            "종목": r["name"],
+            "티커": r["ticker"],
+            "현재가": close_fmt,
+            "등락률": f"{r['stock_change_pct']:+.2f}%",
+            "RS초과": f"{r['rs_spread']:+.2f}%p",
+            "양봉": "양봉" if r["is_yangbong"] else "음봉",
+            "거래량배수": f"{r['vol_ratio']:.1f}배",
+            "AVWAP괴리": f"{r['avwap_diff_pct']:+.1f}%" if r["avwap"] else "-",
+            "점수": f"{r['score']}점",
+            "손절선(-10%)": stop_fmt,
+        })
+
+    res_df = pd.DataFrame(rows)
+    print("\n" + res_df.to_string(index=False))
+    print("==========================================================================================")
+    print("💡 [운용 원칙]: 상위 5종목 이내로 압축 투자하며, 매수가 대비 -10% 도달 시 기계적 손절을 준수합니다.")
+    print("==========================================================================================")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="myStock - AVWAP 및 OBV 다이버전스 주식 수급 분석 시스템"
@@ -283,6 +353,35 @@ def main():
         action="store_true",
         help="장 마감 시간별(국내 15:45, 미국 06:30) 자동 알림 백그라운드 스케줄러 실행",
     )
+    parser.add_argument(
+        "-l", "--leader-scan",
+        action="store_true",
+        help="이광수식 지수 역행 주도주(상대강도/거래량/AVWAP) 스캐너 실행",
+    )
+    parser.add_argument(
+        "--universe",
+        type=str,
+        default="korea",
+        help="주도주 유니버스 프리셋 (korea, us, all, 기본값: korea)",
+    )
+    parser.add_argument(
+        "--min-score",
+        type=float,
+        default=55.0,
+        help="최소 주도주 점수 필터 (0~100, 기본값: 55.0)",
+    )
+    parser.add_argument(
+        "--bench",
+        type=str,
+        default=None,
+        help="비교 기준 지수 티커 (기본값: 자동 판별, 코스피 ^KS11, 코스닥 ^KQ11, S&P500 SPY)",
+    )
+    parser.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="스캔 평가 기준 일자 (YYYY-MM-DD, 기본값: 최신 거래일)",
+    )
 
     args = parser.parse_args()
 
@@ -304,6 +403,16 @@ def main():
     elif args.scheduler:
         from scheduler import start_scheduler_loop
         start_scheduler_loop()
+    elif args.leader_scan:
+        run_leader_scan(
+            universe=args.universe,
+            group=args.group,
+            anchor_date=args.anchor,
+            benchmark_ticker=args.bench,
+            target_date=args.date,
+            min_score=args.min_score,
+            days=args.days,
+        )
     elif args.scan:
         scan_market(group=args.group, anchor_date=args.anchor, days=args.days, order=args.order)
     else:

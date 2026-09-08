@@ -16,6 +16,8 @@ from mystock.watchlist import (
     move_ticker_between_categories,
     copy_ticker_between_categories,
 )
+from mystock.scanner import scan_market_leaders, evaluate_stock_leader, get_default_benchmark_ticker
+from mystock.universe import get_universe_items, KOREA_LEADERS, US_LEADERS
 
 # 1. Page Configuration
 st.set_page_config(
@@ -74,6 +76,7 @@ if "selected_ticker" not in st.session_state:
 
 TAB_NAMES = [
     "📊 상세 차트 분석",
+    "👑 이광수식 주도주 스캐너",
     "🔍 시장 수급 스캐너 (그룹별)",
     "⚙️ 보유/관심 종목 관리",
     "💡 수급 지표 활용 가이드",
@@ -421,7 +424,236 @@ if st.session_state["active_tab"] == "📊 상세 차트 분석":
         )
 
 # ==========================================
-# TAB 2: Multi-Stock Scanner with Notion-style Side Peek & Modal
+# TAB 2: Lee Kwang-soo Leading Stocks Scanner
+# ==========================================
+elif st.session_state["active_tab"] == "👑 이광수식 주도주 스캐너":
+    st.markdown("""
+    <div style="background-color: #0f172a; border: 1px solid #1e293b; border-left: 5px solid #f59e0b; border-radius: 8px; padding: 14px 18px; margin-bottom: 18px;">
+        <h4 style="margin: 0 0 6px 0; color: #f59e0b;">👑 이광수 대표의 '지수 하락 역행 주도주' 발굴 원칙</h4>
+        <p style="margin: 0; color: #cbd5e1; font-size: 0.9rem; line-height: 1.5;">
+            "물이 빠져야 진짜 실력자가 드러난다!" 지수가 -1~2% 급락할 때 하락하지 않고 버티거나 <b>양봉 마감</b>하는 종목은 강력한 메이저 수급이 하락 압력을 이겨내고 있다는 결정적 증거입니다.<br/>
+            단순 낙폭과대주 물타기를 지양하고, <b>거래량이 폭발하며 AVWAP 지지를 받는 5종목 이내 핵심 주도주</b>에 집중 투자합니다.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Top Benchmark Banner
+    b_col1, b_col2, b_col3, b_col4 = st.columns(4)
+    @st.cache_data(ttl=300)
+    def _fetch_bench_summaries():
+        b_list = [
+            ("코스피 (^KS11)", "^KS11"),
+            ("코스닥 (^KQ11)", "^KQ11"),
+            ("S&P 500 (SPY)", "SPY"),
+            ("나스닥 100 (QQQ)", "QQQ"),
+        ]
+        b_res = []
+        for name, sym in b_list:
+            try:
+                b_df = load_stock_data(sym, 10)
+                if b_df is not None and len(b_df) >= 2:
+                    c = b_df.iloc[-1]["Close"]
+                    p_c = b_df.iloc[-2]["Close"]
+                    chg_pct = (c - p_c) / p_c * 100
+                    b_res.append((name, sym, c, chg_pct))
+                else:
+                    b_res.append((name, sym, None, 0.0))
+            except Exception:
+                b_res.append((name, sym, None, 0.0))
+        return b_res
+
+    bench_summaries = _fetch_bench_summaries()
+    for idx, (b_name, b_sym, b_val, b_pct) in enumerate(bench_summaries):
+        target_col = [b_col1, b_col2, b_col3, b_col4][idx]
+        with target_col:
+            if b_val is not None:
+                badge = "🚨 급락" if b_pct <= -1.0 else ("📉 하락" if b_pct < 0 else "📈 상승")
+                st.metric(
+                    label=f"{b_name} {badge}",
+                    value=f"{b_val:,.2f}",
+                    delta=f"{b_pct:+.2f}%",
+                    delta_color="normal" if b_pct >= 0 else "inverse",
+                )
+            else:
+                st.metric(label=b_name, value="조회 불가")
+
+    st.markdown("---")
+
+    # Scanner Controls
+    c_univ, c_bench, c_score, c_btn = st.columns([2.5, 2.0, 1.5, 1.2])
+    with c_univ:
+        univ_options = [
+            "국내 대표 주도주 (40개 우량주)",
+            "미국 빅테크 주도주 (17개 우량주)",
+            "글로벌 통합 주도주 (57개)",
+        ] + [f"내 관심그룹: {cat}" for cat in available_categories]
+        selected_univ_label = st.selectbox("🎯 스캔 대상 유니버스", univ_options, index=0)
+
+    with c_bench:
+        if "미국" in selected_univ_label:
+            bench_opts = ["SPY (S&P 500)", "QQQ (나스닥 100)"]
+        elif "국내" in selected_univ_label:
+            bench_opts = ["^KS11 (코스피 지수)", "^KQ11 (코스닥 지수)"]
+        else:
+            bench_opts = ["^KS11 (코스피 지수)", "^KQ11 (코스닥 지수)", "SPY (S&P 500)", "QQQ (나스닥 100)"]
+        selected_bench_raw = st.selectbox("⚖️ 비교 기준 시장 지수", bench_opts, index=0)
+        selected_bench_ticker = selected_bench_raw.split()[0]
+
+    with c_score:
+        min_score_filter = st.slider("최소 주도주 점수", min_value=40, max_value=85, value=55, step=5)
+
+    with c_btn:
+        st.write("")
+        st.write("")
+        run_rescan = st.button("🚀 주도주 스캔", type="primary", use_container_width=True)
+
+    # Determine universe items
+    if "국내 대표" in selected_univ_label:
+        scan_universe_type = "korea"
+        target_scan_items = None
+    elif "미국 빅테크" in selected_univ_label:
+        scan_universe_type = "us"
+        target_scan_items = None
+    elif "글로벌 통합" in selected_univ_label:
+        scan_universe_type = "all"
+        target_scan_items = None
+    else:
+        cat_name = selected_univ_label.replace("내 관심그룹: ", "")
+        raw_items = watchlist_data.get(cat_name, [])
+        target_scan_items = [
+            {"ticker": it["ticker"], "name": it.get("name", it["ticker"]), "anchor": it.get("anchor")}
+            if isinstance(it, dict) else {"ticker": str(it), "name": str(it), "anchor": None}
+            for it in raw_items
+        ]
+        scan_universe_type = "custom"
+
+    leader_cache_key = f"_leader_scan_{selected_univ_label}_{selected_bench_ticker}_{anchor_str}"
+    if run_rescan or leader_cache_key not in st.session_state:
+        with st.spinner("이광수식 주도주 상대강도 & 수급을 분석 중입니다..."):
+            st.session_state[leader_cache_key] = scan_market_leaders(
+                universe_type=scan_universe_type,
+                custom_tickers=target_scan_items,
+                benchmark_ticker=selected_bench_ticker,
+                anchor_date=anchor_str,
+                min_score=float(min_score_filter),
+                days=120,
+            )
+
+    leader_data = st.session_state.get(leader_cache_key, {})
+    leader_results = leader_data.get("results", [])
+    b_info = leader_data.get("benchmark_info", {})
+
+    if leader_results:
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            st.metric("발굴된 주도주 수", f"{len(leader_results)}개", delta=f"{len(leader_results)}종목 압축 추천")
+        with s2:
+            top_stock = leader_results[0]
+            st.metric("1등 주도주 (RS 1위)", f"{top_stock['name']}", delta=f"{top_stock['score']}점 ({top_stock['grade_badge']})")
+        with s3:
+            st.metric("최고 지수 대비 초과율", f"{top_stock['rs_spread']:+.2f}%p", delta=f"당일 {top_stock['stock_change_pct']:+.2f}%")
+        with s4:
+            counter_cnt = sum(1 for r in leader_results if r["is_counter_trend"])
+            st.metric("지수 역행 양봉 종목", f"{counter_cnt}개", delta="역행 매수세 확인")
+
+        table_rows = []
+        for r in leader_results:
+            c_p = r["close"]
+            price_str = f"{c_p:,.0f}" if c_p >= 100 else f"{c_p:,.2f}"
+            stop_str = f"{r['stop_loss_price']:,.0f}" if r["stop_loss_price"] >= 100 else f"{r['stop_loss_price']:,.2f}"
+            table_rows.append({
+                "등급": r["grade_badge"],
+                "종목명": r["name"],
+                "티커": r["ticker"],
+                "섹터": r.get("sector") or "-",
+                "현재가": price_str,
+                "등락률(%)": round(r["stock_change_pct"], 2),
+                "지수초과(RS %p)": round(r["rs_spread"], 2),
+                "양봉여부": "양봉 🟢" if r["is_yangbong"] else "음봉 🔴",
+                "거래량급증": f"{r['vol_ratio']:.1f}배",
+                "AVWAP괴리(%)": round(r["avwap_diff_pct"], 1) if r["avwap"] else 0.0,
+                "점수": r["score"],
+                "손절기준(-10%)": stop_str,
+                "선정근거": r["rationale"],
+            })
+        leader_df = pd.DataFrame(table_rows)
+
+        peek_leader_ticker = st.session_state.get("leader_peek_ticker", leader_results[0]["ticker"])
+
+        col_tbl, col_peek = st.columns([0.48, 0.52], gap="medium")
+        with col_tbl:
+            st.caption("💡 종목을 클릭하면 우측에서 상세 차트와 투자 노트를 확인할 수 있습니다.")
+            l_event = st.dataframe(
+                leader_df.style.map(lambda v: "color: #ef4444; font-weight: bold;" if isinstance(v, (int, float)) and v > 0 else ("color: #3b82f6; font-weight: bold;" if isinstance(v, (int, float)) and v < 0 else ""), subset=["등락률(%)", "지수초과(RS %p)"]),
+                use_container_width=True,
+                hide_index=True,
+                height=560,
+                on_select="rerun",
+                selection_mode="single-row",
+            )
+            if l_event and l_event.selection and l_event.selection.rows:
+                row_idx = l_event.selection.rows[0]
+                clicked_t = leader_df.iloc[row_idx]["티커"]
+                if clicked_t != peek_leader_ticker:
+                    st.session_state["leader_peek_ticker"] = clicked_t
+                    st.rerun()
+
+        with col_peek:
+            with st.container(border=True):
+                target_r = next((r for r in leader_results if r["ticker"] == peek_leader_ticker), leader_results[0])
+                p_name = target_r["name"]
+                p_code = target_r["ticker"]
+
+                h1, h2, h3 = st.columns([2.5, 1.2, 1.2])
+                with h1:
+                    st.markdown(f"### 👑 **{p_name}** <small style='color:#94a3b8'>({p_code})</small>", unsafe_allow_html=True)
+                with h2:
+                    if st.button("📊 상세분석 이동", key=f"btn_l_nav_{p_code}", use_container_width=True):
+                        st.session_state["selected_ticker"] = p_code
+                        st.session_state["active_tab"] = "📊 상세 차트 분석"
+                        st.rerun()
+                with h3:
+                    if st.button("⛶ 모달 확대", key=f"btn_l_modal_{p_code}", use_container_width=True):
+                        show_chart_modal(p_code, p_name, anchor_str, days_lookback, order_param)
+
+                with st.expander("📝 **이광수식 투자 노트 (Trading Plan) 확인 / 복사**", expanded=True):
+                    tp_price = target_r['close']
+                    tp_price_str = f"{tp_price:,.0f}" if tp_price >= 100 else f"{tp_price:,.2f}"
+                    tp_stop = target_r['stop_loss_price']
+                    tp_stop_str = f"{tp_stop:,.0f}" if tp_stop >= 100 else f"{tp_stop:,.2f}"
+                    tp_text = (
+                        f"**[투자 노트: {p_name} ({p_code})]**\\n"
+                        f"- **진입가(현재가)**: {tp_price_str}원/달러\\n"
+                        f"- **기계적 손절선**: {tp_stop_str} (-10.0% 하락 시 무조건 기계적 손절)\\n"
+                        f"- **익절 원칙**: 고점 대비 일정 비율 하락 시 분할 매도하는 추적 손절매(어깨 매도)\\n"
+                        f"- **선정 근거**: {target_r['rationale']} (주도주 종합 점수: {target_r['score']}점, {target_r['grade']})\\n"
+                        f"- **포트폴리오 비중**: 5종목 압축 원칙에 따라 최대 20% 배정"
+                    )
+                    st.code(tp_text, language="markdown")
+
+                add_col1, add_col2 = st.columns([2, 1])
+                with add_col1:
+                    target_add_cat = st.selectbox("관심 그룹 선택", available_categories, key=f"add_l_cat_sel_{p_code}", label_visibility="collapsed")
+                with add_col2:
+                    if st.button("➕ 관심종목 추가", key=f"btn_l_add_wl_{p_code}", use_container_width=True):
+                        add_ticker_to_category(target_add_cat, p_code, p_name, anchor_str, f"이광수 주도주 ({target_r['grade_badge']}, {target_r['score']}점)")
+                        st.success(f"'{target_add_cat}'에 추가되었습니다!")
+                        st.cache_data.clear()
+                        st.rerun()
+
+                render_stock_chart_view(
+                    target_ticker=p_code,
+                    target_name=p_name,
+                    anchor_date=anchor_str,
+                    days_cnt=days_lookback,
+                    order_val=order_param,
+                    compact=True,
+                )
+    else:
+        st.warning(f"선택한 조건(최소 점수 {min_score_filter}점)을 충족하는 주도주를 찾지 못했습니다. 최소 점수를 낮추거나 다른 유니버스를 선택해 보세요.")
+
+# ==========================================
+# TAB 3: Multi-Stock Scanner with Notion-style Side Peek & Modal
 # ==========================================
 elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)":
     st.subheader("🔍 보유/관심 종목 그룹별 실시간 수급 스캔")
