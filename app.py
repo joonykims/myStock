@@ -63,9 +63,83 @@ st.markdown("""
         font-size: 0.8rem;
         font-weight: 600;
     }
-    /* Top tab radio styling */
+    /* --- Ultra Compact Layout --- */
+    /* --- Ultra Compact Layout --- */
+    /* 1. 최상단 Streamlit 헤더 보존 (사이드바 열기 버튼을 위해) 및 우측 메뉴 숨김 */
+    header[data-testid="stHeader"] {
+        background: transparent !important;
+    }
+    header[data-testid="stHeader"] .stAppDeployButton,
+    header[data-testid="stHeader"] .stToolbar {
+        display: none !important;
+    }
+
+    /* 2. 메인 및 사이드바 최상단 여백 극소화 (헤더와 겹치지 않을 만큼만) */
+    .main .block-container,
+    [data-testid="stMainBlockContainer"],
+    [data-testid="stAppViewBlockContainer"],
+    [data-testid="block-container"] {
+        padding-top: 2.5rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
+    }
+    section[data-testid="stSidebar"] .block-container,
+    div[data-testid="stSidebarUserContent"] {
+        padding-top: 0.5rem !important;
+    }
+    /* 사이드바 열기/닫기 화살표 버튼이 있는 영역은 보이게 유지 (없어지지 않도록) */
+    div[data-testid="stSidebarHeader"] {
+        padding-top: 0.5rem !important;
+        padding-bottom: 0 !important;
+    }
+
+    /* 3. Streamlit 수직 블록 기본 간격(gap) 대폭 축소 */
+    div[data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important;
+    }
+
+    /* 4. 상단 탭 라디오 여백 축소 & 하단 경계선 일체화 (별도 hr 제거용) */
+    div[data-testid="stRadio"] {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-bottom: 8px !important;
+        border-bottom: 1px solid #334155;
+    }
     div[data-testid="stRadio"] > div {
-        gap: 10px;
+        gap: 6px !important;
+    }
+    div[data-testid="stRadio"] label {
+        margin-bottom: 0 !important;
+    }
+
+    /* 5. 사이드바 및 본문 제목 여백 설정 */
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"]:has(h1) {
+        margin-top: 10px !important;
+        margin-bottom: 5px !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+    div[data-testid="stHeadingWithActionElements"] {
+        margin-top: 10px !important;
+        margin-bottom: 15px !important;
+    }
+    div[data-testid="stHeadingWithActionElements"] > h1,
+    div[data-testid="stHeadingWithActionElements"] > h2,
+    div[data-testid="stHeadingWithActionElements"] > h3,
+    div[data-testid="stHeadingWithActionElements"] > h4 {
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+    }
+
+    /* 6. 메트릭 위젯 여백 압축 */
+    div[data-testid="stMetric"] {
+        padding: 0 !important;
+    }
+    div[data-testid="stMetric"] label {
+        margin-bottom: 0 !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -404,8 +478,6 @@ selected_nav = st.radio(
 if selected_nav != st.session_state["active_tab"]:
     st.session_state["active_tab"] = selected_nav
     st.rerun()
-
-st.markdown("---")
 
 # ==========================================
 # TAB 1: Detailed Chart & Metrics
@@ -769,93 +841,187 @@ elif st.session_state["active_tab"] == "🔍 시장 수급 스캐너 (그룹별)
         </style>
         """, unsafe_allow_html=True)
 
-        # --- SIDE-BY-SIDE LAYOUT (Matches the red box area in screenshot) ---
+        # --- OFF-CANVAS SIDE PANEL LAYOUT ---
+        st.caption("💡 종목 행(체크박스)을 **클릭**하면 우측에 **상세 차트 사이드 패널**이 오버레이 형태로 열립니다. (ESC 키로 닫기 가능)")
+        event = st.dataframe(
+            table_df.style.map(style_diff, subset=["이격률(%)"]),
+            use_container_width=True,
+            hide_index=True,
+            height=600 if not peek_ticker else 560,
+            on_select="rerun",
+            selection_mode="single-row",
+        )
+
+        # Handle row selection
+        if event and event.selection and event.selection.rows:
+            clicked_row_idx = event.selection.rows[0]
+            new_ticker = scan_df.iloc[clicked_row_idx]["티커"]
+            if new_ticker != peek_ticker:
+                st.session_state["scanner_peek_ticker"] = new_ticker
+                st.rerun()
+
+        # 2. Off-canvas Overlay Panel
         if peek_ticker:
-            col_scan_list, col_side_panel = st.columns([0.43, 0.57], gap="medium")
+            with st.container(border=True):
+                st.markdown("<div class='offcanvas-marker'></div>", unsafe_allow_html=True)
+                
+                peek_rows = scan_df[scan_df["티커"] == peek_ticker]
+                if not peek_rows.empty:
+                    p_row = peek_rows.iloc[0]
+                    p_name = p_row["종목명"]
+                    p_anchor = p_row.get("개별앵커") or anchor_str
+                else:
+                    p_name = get_stock_name(peek_ticker)
+                    p_anchor = anchor_str
 
-            with col_scan_list:
-                st.caption("💡 종목을 클릭하면 우측 패널 차트가 즉시 전환됩니다.")
-                event = st.dataframe(
-                    table_df.style.map(style_diff, subset=["이격률(%)"]),
-                    use_container_width=True,
-                    hide_index=True,
-                    height=560,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                )
-
-                # Handle row selection
-                if event and event.selection and event.selection.rows:
-                    clicked_row_idx = event.selection.rows[0]
-                    new_ticker = scan_df.iloc[clicked_row_idx]["티커"]
-                    if new_ticker != peek_ticker:
-                        st.session_state["scanner_peek_ticker"] = new_ticker
+                # Header Toolbar inside side panel
+                tb_col1, tb_col2, tb_col3, tb_col4 = st.columns([2.2, 1.1, 1.1, 0.5])
+                with tb_col1:
+                    st.markdown(f"#### 🔎 **{p_name}** <small style='color:#94a3b8'>({peek_ticker})</small>", unsafe_allow_html=True)
+                with tb_col2:
+                    if st.button("⛶ 모달 확대", key="btn_peek_modal", use_container_width=True, help="중앙 대형 모달 팝업으로 차트 확대"):
+                        show_chart_modal(
+                            target_ticker=peek_ticker,
+                            target_name=p_name,
+                            anchor_date=p_anchor,
+                            days_cnt=days_lookback,
+                            order_val=order_param,
+                        )
+                with tb_col3:
+                    if st.button("📊 상세 탭", key="btn_peek_to_tab", use_container_width=True, help="상세 차트 분석 탭으로 이동"):
+                        st.session_state["selected_ticker"] = peek_ticker
+                        st.session_state["active_tab"] = "📊 상세 차트 분석"
+                        st.session_state["programmatic_ticker_change"] = True
+                        st.rerun()
+                with tb_col4:
+                    if st.button("✖", key="btn_peek_close", use_container_width=True, help="사이드 패널 닫기"):
+                        st.session_state["scanner_peek_ticker"] = None
                         st.rerun()
 
-            with col_side_panel:
-                with st.container(border=True):
-                    peek_rows = scan_df[scan_df["티커"] == peek_ticker]
-                    if not peek_rows.empty:
-                        p_row = peek_rows.iloc[0]
-                        p_name = p_row["종목명"]
-                        p_anchor = p_row.get("개별앵커") or anchor_str
-                    else:
-                        p_name = get_stock_name(peek_ticker)
-                        p_anchor = anchor_str
+                st.markdown("---")
 
-                    # Header Toolbar inside side panel
-                    tb_col1, tb_col2, tb_col3, tb_col4 = st.columns([2.2, 1.1, 1.1, 0.5])
-                    with tb_col1:
-                        st.markdown(f"#### 🔎 **{p_name}** <small style='color:#94a3b8'>({peek_ticker})</small>", unsafe_allow_html=True)
-                    with tb_col2:
-                        if st.button("⛶ 모달 확대", key="btn_peek_modal", use_container_width=True, help="중앙 대형 모달 팝업으로 차트 확대"):
-                            show_chart_modal(
-                                target_ticker=peek_ticker,
-                                target_name=p_name,
-                                anchor_date=p_anchor,
-                                days_cnt=days_lookback,
-                                order_val=order_param,
-                            )
-                    with tb_col3:
-                        if st.button("📊 상세 탭", key="btn_peek_to_tab", use_container_width=True, help="상세 차트 분석 탭으로 이동"):
-                            st.session_state["selected_ticker"] = peek_ticker
-                            st.session_state["active_tab"] = "📊 상세 차트 분석"
-                            st.session_state["programmatic_ticker_change"] = True
-                            st.rerun()
-                    with tb_col4:
-                        if st.button("✖", key="btn_peek_close", use_container_width=True, help="사이드 패널 닫기"):
-                            st.session_state["scanner_peek_ticker"] = None
-                            st.rerun()
+                # Render compact chart inside right panel
+                render_stock_chart_view(
+                    target_ticker=peek_ticker,
+                    target_name=p_name,
+                    anchor_date=p_anchor,
+                    days_cnt=days_lookback,
+                    order_val=order_param,
+                    compact=True,
+                )
 
-                    st.markdown("---")
+            # 3. 사이드 패널 이벤트 주입 (JavaScript)
+            st.components.v1.html(f"""
+                <script>
+                const parentDoc = window.parent.document;
+                
+                // 1. ESC 키 이벤트 리스너
+                if (window.parent._myStockEscListener) {{
+                    parentDoc.removeEventListener("keydown", window.parent._myStockEscListener);
+                }}
+                
+                window.parent._myStockEscListener = function(e) {{
+                    if (e.key === "Escape") {{
+                        const buttons = Array.from(parentDoc.querySelectorAll("button"));
+                        const closeBtn = buttons.find(b => b.innerText.includes("✖"));
+                        if(closeBtn) {{
+                            closeBtn.click();
+                        }}
+                    }}
+                }};
+                parentDoc.addEventListener("keydown", window.parent._myStockEscListener);
 
-                    # Render compact chart inside right panel
-                    render_stock_chart_view(
-                        target_ticker=peek_ticker,
-                        target_name=p_name,
-                        anchor_date=p_anchor,
-                        days_cnt=days_lookback,
-                        order_val=order_param,
-                        compact=True,
-                    )
+                // 2. 패널 오버레이 스타일 주입 및 왼쪽 가장자리 드래그 리사이징
+                setTimeout(() => {{
+                    const markers = Array.from(parentDoc.querySelectorAll('.offcanvas-marker'));
+                    if (markers.length > 0) {{
+                        // 전체 앱(루트 레이아웃)이 아닌, 'border=True'로 생성된 가장 가까운 래퍼 타겟팅
+                        let panel = markers[0].closest('div[data-testid="stVerticalBlockBorderWrapper"]');
+                        if (!panel) {{
+                            panel = markers[0].closest('div[data-testid="stVerticalBlock"]');
+                        }}
+                        if (panel) {{
+                            // JS로 오버레이 CSS 완벽 적용
+                            Object.assign(panel.style, {{
+                                position: 'fixed',
+                                top: '0',
+                                right: '0',
+                                width: '45vw',
+                                minWidth: '450px',
+                                maxWidth: '1200px',
+                                height: '100vh',
+                                backgroundColor: '#0b1329',
+                                zIndex: '999999',
+                                borderLeft: '1px solid #334155',
+                                padding: '2rem',
+                                boxShadow: '-10px 0 30px rgba(0,0,0,0.8)',
+                                overflowY: 'auto',
+                                transform: 'translateX(0)',
+                                transition: 'transform 0.3s ease-out',
+                                borderTop: 'none', borderRight: 'none', borderBottom: 'none', borderRadius: '0'
+                            }});
 
-        else:
-            # Full width table mode
-            st.caption("💡 종목 행(체크박스)을 **클릭**하면 우측에 **상세 차트 사이드 패널**이 열립니다.")
-            event = st.dataframe(
-                table_df.style.map(style_diff, subset=["이격률(%)"]),
-                use_container_width=True,
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row",
-            )
-
-            # Handle row selection → open side panel
-            if event and event.selection and event.selection.rows:
-                clicked_row_idx = event.selection.rows[0]
-                clicked_ticker = scan_df.iloc[clicked_row_idx]["티커"]
-                st.session_state["scanner_peek_ticker"] = clicked_ticker
-                st.rerun()
+                            if (panel.querySelector('.left-resizer')) {{
+                                panel.querySelector('.left-resizer').remove();
+                            }}
+                            const resizer = parentDoc.createElement('div');
+                            resizer.className = 'left-resizer';
+                            Object.assign(resizer.style, {{
+                                position: 'absolute',
+                                left: '0',
+                                top: '0',
+                                bottom: '0',
+                                width: '10px',
+                                cursor: 'ew-resize',
+                                backgroundColor: 'transparent',
+                                zIndex: '1000000'
+                            }});
+                            
+                            resizer.addEventListener('mouseenter', () => resizer.style.backgroundColor = 'rgba(255,255,255,0.15)');
+                            resizer.addEventListener('mouseleave', () => resizer.style.backgroundColor = 'transparent');
+                            panel.appendChild(resizer);
+                            
+                            let isResizing = false;
+                            let startX;
+                            let startWidth;
+                            
+                            resizer.addEventListener('mousedown', function(e) {{
+                                isResizing = true;
+                                startX = e.clientX;
+                                startWidth = panel.getBoundingClientRect().width;
+                                parentDoc.body.style.userSelect = 'none';
+                            }});
+                            
+                            if (window.parent._myStockMouseListeners) {{
+                                parentDoc.removeEventListener('mousemove', window.parent._myStockMouseListeners.move);
+                                parentDoc.removeEventListener('mouseup', window.parent._myStockMouseListeners.up);
+                            }}
+                            
+                            const moveHandler = function(e) {{
+                                if (!isResizing) return;
+                                const deltaX = startX - e.clientX; 
+                                const newWidth = startWidth + deltaX;
+                                if (newWidth > 350 && newWidth < 1500) {{
+                                    panel.style.setProperty('width', newWidth + 'px', 'important');
+                                    panel.style.setProperty('min-width', newWidth + 'px', 'important');
+                                }}
+                            }};
+                            
+                            const upHandler = function(e) {{
+                                if (isResizing) {{
+                                    isResizing = false;
+                                    parentDoc.body.style.userSelect = '';
+                                }}
+                            }};
+                            
+                            window.parent._myStockMouseListeners = {{ move: moveHandler, up: upHandler }};
+                            parentDoc.addEventListener('mousemove', moveHandler);
+                            parentDoc.addEventListener('mouseup', upHandler);
+                        }}
+                    }}
+                }}, 400); // DOM 렌더링 대기
+                </script>
+            """, height=0, width=0)
 
     else:
         st.warning("스캔 데이터를 불러오지 못했습니다.")
