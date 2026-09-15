@@ -651,10 +651,23 @@ elif st.session_state["active_tab"] == "👑 이광수식 주도주 스캐너":
         leader_df = pd.DataFrame(table_rows)
 
         peek_leader_ticker = st.session_state.get("leader_peek_ticker", leader_results[0]["ticker"])
+        leader_panel_open = st.session_state.get("leader_peek_panel_open", True)
 
-        col_tbl, col_peek = st.columns([0.48, 0.52], gap="medium")
+        if leader_panel_open:
+            col_tbl, col_peek = st.columns([0.48, 0.52], gap="medium")
+        else:
+            col_tbl = st.container()
+            col_peek = None
+
         with col_tbl:
-            st.caption("💡 종목을 클릭하면 우측에서 상세 차트와 투자 노트를 확인할 수 있습니다.")
+            cap_col, toggle_col = st.columns([5, 1])
+            with cap_col:
+                st.caption("💡 종목을 클릭하면 우측에서 상세 차트와 투자 노트를 확인할 수 있습니다.")
+            with toggle_col:
+                toggle_label = "◀ 패널 닫기" if leader_panel_open else "▶ 패널 열기"
+                if st.button(toggle_label, key="btn_leader_panel_toggle", use_container_width=True):
+                    st.session_state["leader_peek_panel_open"] = not leader_panel_open
+                    st.rerun()
             l_event = st.dataframe(
                 leader_df.style.map(lambda v: "color: #ef4444; font-weight: bold;" if isinstance(v, (int, float)) and v > 0 else ("color: #3b82f6; font-weight: bold;" if isinstance(v, (int, float)) and v < 0 else ""), subset=["등락률(%)", "지수초과(RS %p)"]),
                 use_container_width=True,
@@ -670,13 +683,14 @@ elif st.session_state["active_tab"] == "👑 이광수식 주도주 스캐너":
                     st.session_state["leader_peek_ticker"] = clicked_t
                     st.rerun()
 
-        with col_peek:
+        if leader_panel_open:
+          with col_peek:
             with st.container(border=True):
                 target_r = next((r for r in leader_results if r["ticker"] == peek_leader_ticker), leader_results[0])
                 p_name = target_r["name"]
                 p_code = target_r["ticker"]
 
-                h1, h2, h3 = st.columns([2.5, 1.2, 1.2])
+                h1, h2, h3, h4 = st.columns([2.2, 1.1, 1.1, 0.5])
                 with h1:
                     st.markdown(f"### 👑 **{p_name}** <small style='color:#94a3b8'>({p_code})</small>", unsafe_allow_html=True)
                 with h2:
@@ -687,6 +701,10 @@ elif st.session_state["active_tab"] == "👑 이광수식 주도주 스캐너":
                 with h3:
                     if st.button("⛶ 모달 확대", key=f"btn_l_modal_{p_code}", use_container_width=True):
                         show_chart_modal(p_code, p_name, anchor_str, days_lookback, order_param)
+                with h4:
+                    if st.button("✖", key="btn_leader_panel_close", use_container_width=True, help="패널 닫기"):
+                        st.session_state["leader_peek_panel_open"] = False
+                        st.rerun()
 
                 with st.expander("📝 **이광수식 투자 노트 (Trading Plan) 확인 / 복사**", expanded=True):
                     tp_price = target_r['close']
